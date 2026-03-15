@@ -11,6 +11,7 @@
     <a href="#settings-password" class="settings-nav-pill settings-nav-link" data-target="settings-password">修改密码</a>
     <a href="#settings-log" class="settings-nav-pill settings-nav-link" data-target="settings-log">日志级别</a>
     <a href="#settings-refresh" class="settings-nav-pill settings-nav-link" data-target="settings-refresh">Token 预刷新</a>
+    <a href="#settings-team-import" class="settings-nav-pill settings-nav-link" data-target="settings-team-import">Team 导入</a>
     <a href="#settings-webhook" class="settings-nav-pill settings-nav-link" data-target="settings-webhook">库存预警</a>
 </div>
 
@@ -125,6 +126,24 @@
         </div>
 
         <button type="submit" class="btn btn-primary">保存 Token 刷新配置</button>
+    </form>
+</div>
+
+<!-- Team 导入配置 -->
+<div class="content-section settings-panel" id="settings-team-import">
+    <div class="section-header">
+        <h3>Team 导入</h3>
+    </div>
+
+    <form id="teamImportForm" class="settings-form">
+        <div class="form-group">
+            <label for="defaultTeamMaxMembers">默认总席位</label>
+            <input type="number" id="defaultTeamMaxMembers" name="default_team_max_members"
+                value="{{ default_team_max_members or '6' }}" min="1" max="100" class="form-control">
+            <p class="form-help">新导入 Team 时写入的默认总席位。默认值为 6，仅影响后续新导入的数据。</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary">保存 Team 导入配置</button>
     </form>
 </div>
 
@@ -360,6 +379,38 @@
 
             if (response.ok && data.success) {
                 showToast(data.message || 'Token 刷新配置已保存', 'success');
+            } else {
+                showToast(data.error || '保存失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+
+    // Team 导入配置表单
+    document.getElementById('teamImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const default_team_max_members = parseInt(document.getElementById('defaultTeamMaxMembers').value);
+
+        if (isNaN(default_team_max_members) || default_team_max_members < 1 || default_team_max_members > 100) {
+            showToast('默认总席位必须在 1~100 之间', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/admin/settings/team-import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ default_team_max_members })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                showToast(data.message || 'Team 导入配置已保存', 'success');
             } else {
                 showToast(data.error || '保存失败', 'error');
             }

@@ -54,6 +54,11 @@ async def create_default_settings():
                 value=settings.log_level,
                 description="日志级别"
             ),
+            Setting(
+                key="default_team_max_members",
+                value="6",
+                description="新导入 Team 的默认总席位"
+            ),
         ]
 
         session.add_all(default_settings)

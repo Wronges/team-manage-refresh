@@ -1604,7 +1604,8 @@ async def settings_page(
                 "api_key": await settings_service.get_setting(db, "api_key", ""),
                 "token_refresh_interval_minutes": await settings_service.get_setting(db, "token_refresh_interval_minutes", "30"),
                 "token_refresh_window_hours": await settings_service.get_setting(db, "token_refresh_window_hours", "2"),
-                "token_refresh_client_id": await settings_service.get_setting(db, "token_refresh_client_id", "")
+                "token_refresh_client_id": await settings_service.get_setting(db, "token_refresh_client_id", ""),
+                "default_team_max_members": await settings_service.get_setting(db, "default_team_max_members", "6"),
             }
         )
 
@@ -1639,6 +1640,11 @@ class TokenRefreshSettingsRequest(BaseModel):
     interval_minutes: int = Field(30, ge=5, le=1440, description="定时刷新间隔（分钟）")
     window_hours: int = Field(2, ge=1, le=24, description="过期前提前刷新窗口（小时）")
     client_id: str = Field("", description="OAuth Client ID（用于 RT 刷新）")
+
+
+class TeamImportSettingsRequest(BaseModel):
+    """Team 导入设置请求"""
+    default_team_max_members: int = Field(6, ge=1, le=100, description="新导入 Team 的默认总席位")
 
 
 class AnnouncementUpdateRequest(BaseModel):
@@ -1894,6 +1900,41 @@ async def update_token_refresh_settings(
 
     except Exception as e:
         logger.error(f"更新 Token 自动刷新设置失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": f"更新失败: {str(e)}"}
+        )
+
+
+@router.post("/settings/team-import")
+async def update_team_import_settings(
+    team_import_data: TeamImportSettingsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """更新 Team 导入默认配置。"""
+    try:
+        logger.info(
+            "管理员更新 Team 导入配置: default_team_max_members=%s",
+            team_import_data.default_team_max_members,
+        )
+
+        success = await settings_service.update_setting(
+            db,
+            "default_team_max_members",
+            str(team_import_data.default_team_max_members),
+        )
+
+        if success:
+            return JSONResponse(content={"success": True, "message": "Team 导入配置已保存"})
+
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "保存失败"}
+        )
+
+    except Exception as e:
+        logger.error(f"更新 Team 导入设置失败: {e}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"success": False, "error": f"更新失败: {str(e)}"}

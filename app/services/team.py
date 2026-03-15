@@ -343,12 +343,13 @@ class TeamService:
             结果字典,包含 success, team_id (第一个导入的), message, error
         """
         try:
+            from app.services.settings import settings_service
+
             # 0. 如果带有 refresh_token 但未传 client_id，先尝试自动补齐
             if refresh_token and not client_id:
                 if access_token:
                     client_id = self.jwt_parser.extract_client_id(access_token)
                 if not client_id:
-                    from app.services.settings import settings_service
                     fallback_client_id = await settings_service.get_setting(db_session, "token_refresh_client_id", "")
                     client_id = fallback_client_id.strip() if fallback_client_id else None
                 if client_id:
@@ -550,8 +551,22 @@ class TeamService:
                     beta_settings = settings_result["data"].get("beta_settings", {})
                     device_code_auth_enabled = beta_settings.get("codex_device_code_auth", False)
 
-                # 确定状态和最大成员数 (默认 5)
-                max_members = 5
+                # 确定状态和最大成员数 (默认读取系统设置，异常时回退到 6)
+                max_members_raw = await settings_service.get_setting(
+                    db_session,
+                    "default_team_max_members",
+                    "6"
+                )
+                try:
+                    max_members = int(str(max_members_raw or "6").strip() or 6)
+                except (TypeError, ValueError):
+                    logger.warning(f"默认总席位配置无效: {max_members_raw}, 已回退到 6")
+                    max_members = 6
+
+                if max_members < 1 or max_members > 100:
+                    logger.warning(f"默认总席位超出允许范围: {max_members}, 已回退到 6")
+                    max_members = 6
+
                 status = "active"
                 if current_members >= max_members:
                     status = "full"
