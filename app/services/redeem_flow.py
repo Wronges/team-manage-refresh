@@ -132,8 +132,8 @@ class RedeemFlowService:
             if exclude_team_ids:
                 stmt = stmt.where(Team.id.not_in(exclude_team_ids))
             
-            # 优先选择人数最少的 Team (负载均衡)
-            stmt = stmt.order_by(Team.current_members.asc(), Team.created_at.desc())
+            # 按 Team ID 从小到大顺序分配：当前 Team 满员后再轮到下一个 Team
+            stmt = stmt.order_by(Team.id.asc())
             
             result = await db_session.execute(stmt)
             team = result.scalars().first()
