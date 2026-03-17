@@ -7,6 +7,91 @@ function getCurrentPoolType() {
  * GPT Team 管理系统 - 通用 JavaScript
  */
 
+function applySystemTheme(themeName) {
+    const body = document.body;
+    if (!body) return;
+
+    const normalized = String(themeName || '').toLowerCase() === 'warm' ? 'warm' : 'ocean';
+    body.dataset.uiTheme = normalized;
+    body.classList.remove('theme-ocean', 'theme-warm');
+    body.classList.add(`theme-${normalized}`);
+}
+
+function getCurrentSystemTheme() {
+    const bodyTheme = document.body?.dataset?.uiTheme;
+    if (bodyTheme === 'warm' || bodyTheme === 'ocean') return bodyTheme;
+    if (window.SYSTEM_UI_THEME === 'warm' || window.SYSTEM_UI_THEME === 'ocean') return window.SYSTEM_UI_THEME;
+    return 'ocean';
+}
+
+async function saveSystemTheme(theme) {
+    const response = await fetch('/admin/settings/ui-theme', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ theme })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || '保存失败');
+    }
+
+    return data.theme || theme;
+}
+
+async function initThemeSwitcher() {
+    const isAdmin = !!document.body?.classList.contains('admin-theme');
+    applySystemTheme(getCurrentSystemTheme());
+
+    if (isAdmin) {
+        try {
+            const response = await fetch('/admin/settings/ui-theme');
+            const data = await response.json();
+            if (response.ok && data.success) {
+                applySystemTheme(data.theme);
+            }
+        } catch (error) {
+            console.error('load ui theme failed:', error);
+        }
+    }
+
+    if (!isAdmin) return;
+
+    const openBtn = document.getElementById('openThemeSwitcherBtn');
+    const saveBtn = document.getElementById('saveThemeBtn');
+    const modal = document.getElementById('themeSwitcherModal');
+    const options = Array.from(document.querySelectorAll('input[name="themeOption"]'));
+
+    if (!openBtn || !saveBtn || !modal || options.length === 0) return;
+
+    const syncSelected = () => {
+        const current = getCurrentSystemTheme();
+        options.forEach((option) => {
+            option.checked = option.value === current;
+        });
+    };
+
+    openBtn.addEventListener('click', () => {
+        syncSelected();
+        showModal('themeSwitcherModal');
+    });
+
+    saveBtn.addEventListener('click', async () => {
+        const selected = options.find((option) => option.checked)?.value || 'ocean';
+        try {
+            const savedTheme = await saveSystemTheme(selected);
+            applySystemTheme(savedTheme);
+            showToast('系统配色已保存', 'success');
+            hideModal('themeSwitcherModal');
+        } catch (error) {
+            showToast(error.message || '保存失败', 'error');
+        }
+    });
+}
+
+
 // Toast 提示函数
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
@@ -111,6 +196,8 @@ function setSingleImportMode(mode = 'quick') {
 document.addEventListener('DOMContentLoaded', function () {
     // 检查认证状态
     checkAuthStatus();
+
+    initThemeSwitcher();
 
     // OAuth 一键导入按钮绑定（避免仅依赖内联 onclick）
     const btnOneClickToken = document.getElementById('btnOneClickToken');
