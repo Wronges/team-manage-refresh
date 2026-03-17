@@ -20,6 +20,7 @@ from app.services.chatgpt import chatgpt_service
 from app.services.settings import (
     settings_service,
     DEFAULT_WARRANTY_EXPIRATION_MODE,
+    DEFAULT_UI_THEME,
 )
 from app.models import RedemptionCode, Team
 from app.utils.time_utils import get_now
@@ -37,6 +38,14 @@ import json
 # 服务实例
 team_service = TeamService()
 redemption_service = RedemptionService()
+
+
+async def resolve_ui_theme(db: AsyncSession) -> str:
+    """获取当前系统 UI 主题。"""
+    return settings_service.normalize_ui_theme(
+        await settings_service.get_setting(db, "ui_theme", DEFAULT_UI_THEME)
+    )
+
 
 
 # 请求模型
@@ -159,6 +168,7 @@ async def admin_dashboard(
                 "request": request,
                 "user": current_user,
                 "active_page": "dashboard",
+                "ui_theme": await resolve_ui_theme(db),
                 "teams": teams_result.get("teams", []),
                 "stats": stats,
                 "search": search,
@@ -241,6 +251,7 @@ async def welfare_dashboard(
                 "request": request,
                 "user": current_user,
                 "active_page": "welfare",
+                "ui_theme": await resolve_ui_theme(db),
                 "teams": teams_result.get("teams", []),
                 "stats": stats,
                 "search": search,
@@ -1041,6 +1052,7 @@ async def codes_list_page(
                 "request": request,
                 "user": current_user,
                 "active_page": "codes",
+                "ui_theme": await resolve_ui_theme(db),
                 "codes": codes,
                 "stats": stats,
                 "search": search,
@@ -1500,6 +1512,7 @@ async def records_page(
                 "request": request,
                 "user": current_user,
                 "active_page": "records",
+                "ui_theme": await resolve_ui_theme(db),
                 "records": paginated_records,
                 "stats": stats,
                 "filters": {
@@ -1599,6 +1612,7 @@ async def settings_page(
                 "request": request,
                 "user": current_user,
                 "active_page": "settings",
+                "ui_theme": await resolve_ui_theme(db),
                 "proxy_enabled": proxy_config["enabled"],
                 "proxy": proxy_config["proxy"],
                 "log_level": log_level,
@@ -1669,11 +1683,56 @@ class WarrantyExpirationSettingsRequest(BaseModel):
     )
 
 
+class UiThemeSettingsRequest(BaseModel):
+    """系统配色设置请求"""
+    theme: Literal["ocean", "warm"] = Field(DEFAULT_UI_THEME, description="系统配色主题")
+
+
 class AnnouncementUpdateRequest(BaseModel):
     """公告配置请求"""
     enabled: bool = Field(False, description="是否启用公告")
     markdown: str = Field("", description="公告 Markdown 内容")
 
+
+
+
+@router.get("/settings/ui-theme")
+async def get_ui_theme_settings(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """获取系统配色设置。"""
+    theme = settings_service.normalize_ui_theme(
+        await settings_service.get_setting(db, "ui_theme", DEFAULT_UI_THEME)
+    )
+    return JSONResponse(content={"success": True, "theme": theme})
+
+
+@router.post("/settings/ui-theme")
+async def update_ui_theme_settings(
+    theme_data: UiThemeSettingsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """更新系统配色设置。"""
+    try:
+        theme = settings_service.normalize_ui_theme(theme_data.theme)
+        logger.info("管理员更新系统配色: %s", theme)
+
+        success = await settings_service.update_setting(db, "ui_theme", theme)
+        if success:
+            return JSONResponse(content={"success": True, "message": "系统配色已保存", "theme": theme})
+
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "保存失败"}
+        )
+    except Exception as e:
+        logger.error(f"更新系统配色失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": f"更新失败: {str(e)}"}
+        )
 
 @router.get("/announcement", response_class=HTMLResponse)
 async def announcement_page(
@@ -1698,6 +1757,7 @@ async def announcement_page(
                 "request": request,
                 "user": current_user,
                 "active_page": "announcement",
+                "ui_theme": await resolve_ui_theme(db),
                 "announcement_enabled": announcement_enabled,
                 "announcement_markdown": announcement_markdown,
             }
