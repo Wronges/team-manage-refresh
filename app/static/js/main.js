@@ -508,15 +508,17 @@ function toIsoStringWithOffset8(dateObj) {
 function buildOAuthJsonTemplate(parsedData) {
     const accessToken = parsedData.access_token || '';
     const refreshToken = parsedData.refresh_token || '';
-    const clientId = parsedData.client_id || '';
     const raw = parsedData.raw || {};
+    const idToken = raw.id_token || parsedData.id_token || '';
 
     const accessPayload = decodeJwtPayload(accessToken) || {};
+    const idPayload = decodeJwtPayload(idToken) || {};
     const accessAuth = accessPayload['https://api.openai.com/auth'] || {};
     const accessProfile = accessPayload['https://api.openai.com/profile'] || {};
+    const idAuth = idPayload['https://api.openai.com/auth'] || {};
 
-    const accountId = raw.account_id || parsedData.account_id || accessAuth.chatgpt_account_id || '';
-    const email = raw.email || parsedData.email || accessProfile.email || '';
+    const accountId = raw.account_id || parsedData.account_id || accessAuth.chatgpt_account_id || idAuth.chatgpt_account_id || '';
+    const email = raw.email || parsedData.email || accessProfile.email || idPayload.email || '';
     const exp = accessPayload.exp ? new Date(accessPayload.exp * 1000) : null;
     const expired = raw.expired || parsedData.expired || (exp ? toIsoStringWithOffset8(exp) : '');
 
@@ -526,11 +528,10 @@ function buildOAuthJsonTemplate(parsedData) {
         disabled: typeof raw.disabled === 'boolean' ? raw.disabled : false,
         email,
         expired,
-        id_token: raw.id_token || parsedData.id_token || '',
+        id_token: idToken,
         last_refresh: raw.last_refresh || parsedData.last_refresh || toIsoStringWithOffset8(new Date()),
         refresh_token: refreshToken,
-        type: raw.type || parsedData.type || 'codex',
-        client_id: clientId
+        type: raw.type || parsedData.type || 'codex'
     };
 }
 
