@@ -179,8 +179,7 @@ body.admin-theme .page-header {
 
 body.modal-open .navbar,
 body.modal-open .sidebar,
-body.modal-open .footer,
-body.modal-open .sidebar-overlay {
+body.modal-open .footer {
     pointer-events: none;
     user-select: none;
     opacity: 0;
@@ -191,6 +190,10 @@ body.modal-open .sidebar-overlay {
 body.modal-open .main-container {
     pointer-events: none;
     user-select: none;
+}
+
+body.modal-open .sidebar-overlay {
+    display: none !important;
 }
 
 body.modal-open .modal-overlay.show {
