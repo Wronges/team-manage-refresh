@@ -1108,6 +1108,24 @@ body.admin-theme .toast {
     word-break: break-word;
 }
 
+
+.batch-token-input-box {
+    margin-bottom: 1rem;
+}
+
+.batch-token-input-title {
+    display: inline-block;
+    margin-bottom: 0.5rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.batch-token-textarea {
+    min-height: 180px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 .import-mode-toggle-wrap {
     margin: 0.75rem 0 1rem;
     text-align: center;
@@ -1387,6 +1405,11 @@ body.admin-theme .toast {
         padding: 0 1rem;
     }
 
+    body.admin-theme .main-container {
+        position: static;
+        z-index: auto;
+    }
+
     .navbar-left {
         display: flex;
         align-items: center;
@@ -1424,6 +1447,18 @@ body.admin-theme .toast {
         box-shadow: var(--shadow-lg);
         width: 280px;
         height: 100vh;
+        background-color: var(--bg-surface);
+    }
+
+    body.admin-theme .sidebar {
+        background-color: #0b1733;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    body.admin-theme.theme-warm .sidebar,
+    html.theme-warm body.admin-theme .sidebar {
+        background-color: #fffaf4;
     }
 
     .sidebar.open {
@@ -1436,8 +1471,7 @@ body.admin-theme .toast {
         left: 0;
         right: 0;
         bottom: 0;
-        background-color: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(4px);
+        background-color: rgba(0, 0, 0, 0.28);
         z-index: 1000;
         opacity: 0;
         pointer-events: none;
