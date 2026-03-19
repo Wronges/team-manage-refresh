@@ -1405,6 +1405,11 @@ body.admin-theme .toast {
         padding: 0 1rem;
     }
 
+    body.admin-theme .main-container {
+        position: static;
+        z-index: auto;
+    }
+
     .navbar-left {
         display: flex;
         align-items: center;
