@@ -232,7 +232,7 @@ function renderTeamsList() {
     availableTeams.forEach(team => {
         const teamCard = document.createElement('div');
         teamCard.className = 'team-card';
-        teamCard.onclick = () => selectTeam(team.id);
+        teamCard.onclick = () => selectTeam(team.id, teamCard);
 
         const planBadge = team.subscription_plan === 'Plus' ? 'badge-plus' : 'badge-pro';
 
@@ -261,14 +261,16 @@ function renderTeamsList() {
 }
 
 // 选择Team
-function selectTeam(teamId) {
+function selectTeam(teamId, teamCard) {
     selectedTeamId = teamId;
 
     // 更新UI
     document.querySelectorAll('.team-card').forEach(card => {
         card.classList.remove('selected');
     });
-    event.currentTarget.classList.add('selected');
+    if (teamCard) {
+        teamCard.classList.add('selected');
+    }
 
     // 立即确认兑换
     confirmRedeem(teamId);
