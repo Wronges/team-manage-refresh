@@ -487,6 +487,9 @@ class RedeemFlowService:
                                 # 同步更新缓存，避免下一次校验读取到旧值
                                 settings_service._cache["welfare_common_code_used_count"] = used_setting.value
 
+                            if is_virtual_welfare_code:
+                                await self.redemption_service.ensure_virtual_welfare_shadow_code(db_session, code)
+
                             record = RedemptionRecord(
                                 email=email,
                                 code=code,

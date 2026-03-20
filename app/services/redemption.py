@@ -65,6 +65,44 @@ class RedemptionService:
         redemption_code.used_at = None
         redemption_code.warranty_expires_at = None
 
+
+    async def ensure_virtual_welfare_shadow_code(
+        self,
+        db_session: AsyncSession,
+        welfare_code: str
+    ) -> Optional[RedemptionCode]:
+        """
+        为当前福利通用码维护一条仅用于历史记录外键兼容的影子兑换码。
+        该记录不会参与真实校验逻辑，当前码的有效性始终以 settings 中的值为准。
+        """
+        normalized_code = str(welfare_code or "").strip()
+        if not normalized_code:
+            return None
+
+        result = await db_session.execute(
+            select(RedemptionCode).where(RedemptionCode.code == normalized_code)
+        )
+        shadow_code = result.scalar_one_or_none()
+
+        if shadow_code:
+            shadow_code.pool_type = "welfare"
+            shadow_code.reusable_by_seat = True
+            shadow_code.status = shadow_code.status or "expired"
+            shadow_code.has_warranty = False
+            shadow_code.warranty_days = 0
+            return shadow_code
+
+        shadow_code = RedemptionCode(
+            code=normalized_code,
+            status="expired",
+            has_warranty=False,
+            warranty_days=0,
+            pool_type="welfare",
+            reusable_by_seat=True,
+        )
+        db_session.add(shadow_code)
+        return shadow_code
+
     async def get_virtual_welfare_code_usage(
         self,
         db_session: AsyncSession,
@@ -345,15 +383,51 @@ class RedemptionService:
             结果字典,包含 success, valid, reason, redemption_code, error
         """
         try:
-            # 1. 查询兑换码
+            # 1. 优先按 settings 判断当前福利通用兑换码。
+            # 即使数据库里存在用于兼容历史记录外键的影子码，也不能影响当前福利码的真实有效性。
+            welfare_code = (await settings_service.get_setting(db_session, "welfare_common_code", "") or "").strip()
+            if welfare_code and code == welfare_code:
+                welfare_usage = await self.get_virtual_welfare_code_usage(db_session, welfare_code=welfare_code)
+                used_count = int(welfare_usage["used_count"] or 0)
+                effective_limit = int(welfare_usage["usable_capacity"] or 0)
+
+                if effective_limit <= 0 or used_count >= effective_limit:
+                    return {
+                        "success": True,
+                        "valid": False,
+                        "reason": "兑换码次数已用完，无法进行兑换",
+                        "redemption_code": None,
+                        "error": None
+                    }
+
+                return {
+                    "success": True,
+                    "valid": True,
+                    "reason": "兑换码有效",
+                    "redemption_code": {
+                        "id": None,
+                        "code": code,
+                        "status": "virtual_welfare",
+                        "expires_at": None,
+                        "created_at": None,
+                        "has_warranty": False,
+                        "warranty_days": 0,
+                        "pool_type": "welfare",
+                        "reusable_by_seat": True,
+                        "virtual_welfare_code": True,
+                        "limit": effective_limit,
+                        "used_count": used_count,
+                    },
+                    "error": None
+                }
+
+            # 2. 查询兑换码
             stmt = select(RedemptionCode).where(RedemptionCode.code == code)
             result = await db_session.execute(stmt)
             redemption_code = result.scalar_one_or_none()
 
             if not redemption_code:
                 # 兼容福利通用兑换码：只存 settings，不写 redemption_codes 表
-                from app.services.settings import settings_service
-                welfare_code = (await settings_service.get_setting(db_session, "welfare_common_code", "") or "").strip()
                 if welfare_code and code == welfare_code:
                     welfare_usage = await self.get_virtual_welfare_code_usage(db_session, welfare_code=welfare_code)
                     used_count = int(welfare_usage["used_count"] or 0)

@@ -319,6 +319,8 @@ async def generate_welfare_common_code(
             "welfare_common_code_used_count": "0",
             "welfare_common_code_generated_at": get_now().isoformat()
         })
+        await redemption_service.ensure_virtual_welfare_shadow_code(db, code)
+        await db.commit()
 
         return JSONResponse(content={"success": True, "code": code, "limit": total_seats, "used": 0, "remaining": total_seats})
     except Exception as e:

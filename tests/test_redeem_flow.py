@@ -86,6 +86,7 @@ class RedeemFlowServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(__import__("sqlalchemy").text("PRAGMA foreign_keys=ON"))
 
     async def asyncTearDown(self):
         await self.engine.dispose()
@@ -234,6 +235,44 @@ class RedeemFlowServiceTests(unittest.IsolatedAsyncioTestCase):
             ).scalar_one()
             self.assertEqual(mapping.status, "joined")
             self.assertEqual(mapping.missing_sync_count, 0)
+
+
+    async def test_virtual_welfare_code_creates_shadow_code_for_redemption_record(self):
+        async with self.session_factory() as session:
+            team = Team(
+                id=10,
+                email="welfare-owner@example.com",
+                access_token_encrypted="token-10",
+                account_id="acct-welfare",
+                team_name="Welfare Team",
+                current_members=1,
+                max_members=6,
+                status="active",
+                pool_type="welfare",
+            )
+            session.add(team)
+            await session.commit()
+
+            service = RedeemFlowService()
+            shadow = await service.redemption_service.ensure_virtual_welfare_shadow_code(session, "WELF-TEST-CODE")
+            await session.commit()
+
+            self.assertIsNotNone(shadow)
+            self.assertEqual(shadow.code, "WELF-TEST-CODE")
+            self.assertEqual(shadow.pool_type, "welfare")
+            self.assertTrue(shadow.reusable_by_seat)
+
+            record = RedemptionRecord(
+                email="user@example.com",
+                code="WELF-TEST-CODE",
+                team_id=10,
+                account_id="acct-welfare",
+            )
+            session.add(record)
+            await session.commit()
+
+            stored_record = (await session.execute(select(RedemptionRecord).where(RedemptionRecord.code == "WELF-TEST-CODE"))).scalar_one()
+            self.assertEqual(stored_record.team_id, 10)
 
     async def test_locked_team_returns_conflict_without_consuming_code(self):
         await self._seed_basic_data()
