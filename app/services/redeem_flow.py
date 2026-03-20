@@ -188,6 +188,7 @@ class RedeemFlowService:
         async with _code_locks[code]:
             for attempt in range(max_retries):
                 logger.info(f"兑换尝试 {attempt + 1}/{max_retries} (Code: {code}, Email: {email})")
+                seat_reserved = False
                 
                 try:
                     validate_result = await self.redemption_service.validate_code(code, db_session)
@@ -262,6 +263,12 @@ class RedeemFlowService:
                                 target_team.status = "full"
                                 raise Exception("该 Team 已满, 请选择其他 Team 尝试")
 
+                            # 预留一个席位，避免并发兑换把同一辆车超卖到 max_members 以上
+                            target_team.current_members += 1
+                            seat_reserved = True
+                            if target_team.current_members >= target_team.max_members:
+                                target_team.status = "full"
+
                             # 提取必要信息后立即提交，释放 DB 锁以进行耗时的 API 调用
                             account_id_to_use = target_team.account_id
                             team_email_to_use = target_team.email
@@ -303,17 +310,44 @@ class RedeemFlowService:
                                 err_str = str(err).lower()
                                 if any(kw in err_str for kw in ["already in workspace", "already in team", "already a member"]):
                                     logger.info(f"用户 {email} 已经在 Team {team_id_final} 中，视为兑换成功")
+                                    if seat_reserved and target_team.current_members > 0:
+                                        target_team.current_members -= 1
+                                    seat_reserved = False
                                 else:
                                     if any(kw in err_str for kw in ["maximum number of seats", "full", "no seats"]):
+                                        if seat_reserved:
+                                            target_team.current_members = max(
+                                                target_team.current_members - 1,
+                                                target_team.max_members
+                                            )
+                                            seat_reserved = False
                                         target_team.status = "full"
                                         await db_session.commit()
                                         raise Exception(f"该 Team 席位已满 (API Error: {err})")
-                                    await db_session.rollback()
+                                    if seat_reserved and target_team.current_members > 0:
+                                        target_team.current_members -= 1
+                                        seat_reserved = False
+                                    if target_team.current_members >= target_team.max_members:
+                                        target_team.status = "full"
+                                    elif target_team.expires_at and target_team.expires_at < get_now():
+                                        target_team.status = "expired"
+                                    else:
+                                        target_team.status = "active"
+                                    await db_session.commit()
                                     raise Exception(err)
 
                             invite_data = invite_res.get("data", {})
                             if "account_invites" in invite_data and not invite_data.get("account_invites"):
-                                await db_session.rollback()
+                                if seat_reserved and target_team.current_members > 0:
+                                    target_team.current_members -= 1
+                                    seat_reserved = False
+                                if target_team.current_members >= target_team.max_members:
+                                    target_team.status = "full"
+                                elif target_team.expires_at and target_team.expires_at < get_now():
+                                    target_team.status = "expired"
+                                else:
+                                    target_team.status = "active"
+                                await db_session.commit()
                                 raise Exception("Team账号受限: 官方拦截下发(响应空列表)，请检查账单/风控状态")
 
                             # 成功逻辑
@@ -384,9 +418,7 @@ class RedeemFlowService:
                                 is_warranty_redemption=(bool(rc and rc.has_warranty and (not rc.reusable_by_seat)))
                             )
                             db_session.add(record)
-                            target_team.current_members += 1
-                            if target_team.current_members >= target_team.max_members:
-                                target_team.status = "full"
+                            seat_reserved = False
                             
                             await db_session.commit()
                             
@@ -420,6 +452,30 @@ class RedeemFlowService:
                             await db_session.rollback()
                     except:
                         pass
+
+                    if seat_reserved and team_id_final:
+                        try:
+                            if db_session.in_transaction():
+                                await db_session.rollback()
+                            await db_session.begin()
+                            res = await db_session.execute(
+                                select(Team).where(Team.id == team_id_final).with_for_update()
+                            )
+                            reserved_team = res.scalar_one_or_none()
+                            if reserved_team and reserved_team.current_members > 0:
+                                reserved_team.current_members -= 1
+                                if reserved_team.current_members >= reserved_team.max_members:
+                                    reserved_team.status = "full"
+                                elif reserved_team.expires_at and reserved_team.expires_at < get_now():
+                                    reserved_team.status = "expired"
+                                else:
+                                    reserved_team.status = "active"
+                                await db_session.commit()
+                            else:
+                                await db_session.rollback()
+                        except Exception:
+                            if db_session.in_transaction():
+                                await db_session.rollback()
                     
                     # 判读是否中断重试
                     if any(kw in last_error for kw in ["不存在", "已使用", "已有正在使用", "质保已过期"]):

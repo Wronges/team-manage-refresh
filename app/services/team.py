@@ -1762,6 +1762,26 @@ class TeamService:
                     "该 Team 的登录凭证已过期，且自动刷新失败，请重新登录或重新导入",
                 )
 
+            sync_result = await self.sync_team_info(team_id, db_session)
+            if not sync_result.get("success"):
+                return self._admin_error(
+                    "team_sync_failed",
+                    sync_result.get("error") or "拉取 Team 最新成员状态失败，请稍后重试",
+                )
+
+            team = await db_session.get(Team, team_id)
+            if not team:
+                return self._admin_error("team_not_found", f"Team ID {team_id} 不存在")
+
+            if team.current_members >= team.max_members or team.status == "full":
+                team.status = "full"
+                await db_session.commit()
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": "Team 已满,无法添加成员"
+                }
+
             # 4. 调用 ChatGPT API 发送邀请
             invite_result = await self.chatgpt_service.send_invite(
                 access_token,
