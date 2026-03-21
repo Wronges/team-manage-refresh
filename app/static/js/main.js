@@ -123,9 +123,12 @@ async function initThemeSwitcher() {
 // Toast 提示函数
 let toastTimer = null;
 
+function hasVisibleModal() {
+    return !!document.querySelector('.modal-overlay.show');
+}
+
 function getToastMountTarget() {
-    const openModal = document.querySelector('.modal-overlay.show .modal');
-    return openModal || document.body;
+    return document.body;
 }
 
 function syncToastMountTarget() {
@@ -137,7 +140,7 @@ function syncToastMountTarget() {
         target.appendChild(toast);
     }
 
-    toast.classList.toggle('in-modal', target !== document.body);
+    toast.classList.toggle('in-modal', hasVisibleModal());
 }
 
 function showToast(message, type = 'info') {
