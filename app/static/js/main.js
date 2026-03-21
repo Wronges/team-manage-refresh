@@ -121,9 +121,30 @@ async function initThemeSwitcher() {
 
 
 // Toast 提示函数
+let toastTimer = null;
+
+function getToastMountTarget() {
+    const openModal = document.querySelector('.modal-overlay.show .modal');
+    return openModal || document.body;
+}
+
+function syncToastMountTarget() {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+
+    const target = getToastMountTarget();
+    if (toast.parentElement !== target) {
+        target.appendChild(toast);
+    }
+
+    toast.classList.toggle('in-modal', target !== document.body);
+}
+
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
     if (!toast) return;
+
+    syncToastMountTarget();
 
     let icon = 'info';
     if (type === 'success') icon = 'check-circle';
@@ -131,13 +152,20 @@ function showToast(message, type = 'info') {
 
     toast.innerHTML = `<i data-lucide="${icon}"></i><span>${escapeHtml(message)}</span>`;
     toast.className = `toast ${type} show`;
+    toast.classList.toggle('in-modal', toast.parentElement !== document.body);
 
     if (window.lucide) {
         lucide.createIcons();
     }
 
-    setTimeout(() => {
+    if (toastTimer) {
+        clearTimeout(toastTimer);
+    }
+
+    toastTimer = setTimeout(() => {
         toast.classList.remove('show');
+        toastTimer = null;
+        syncToastMountTarget();
     }, 3000);
 }
 
@@ -148,6 +176,8 @@ function mountGlobalOverlayNodes() {
             document.body.appendChild(node);
         }
     });
+
+    syncToastMountTarget();
 }
 
 // 日期格式化函数
@@ -350,6 +380,8 @@ function showModal(modalId) {
         if (modalId === 'importTeamModal') {
             setSingleImportMode('quick');
         }
+
+        syncToastMountTarget();
     }
 }
 
@@ -384,6 +416,8 @@ function hideModal(modalId) {
         if (modalId === 'importTeamModal') {
             resetBatchImportForm();
         }
+
+        syncToastMountTarget();
     }
 }
 

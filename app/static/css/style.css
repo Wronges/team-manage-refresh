@@ -1292,6 +1292,17 @@ body.admin-theme .toast {
     transition: transform var(--transition-base), opacity var(--transition-fast);
     z-index: 4000;
     border: 1px solid var(--border-base);
+    pointer-events: none;
+}
+
+.toast.in-modal {
+    position: absolute;
+    top: 5rem;
+    right: 1rem;
+    bottom: auto;
+    width: min(360px, calc(100% - 2rem));
+    --toast-offset: calc(-100% - 16px);
+    z-index: 30;
 }
 
 body.modal-open .toast {
