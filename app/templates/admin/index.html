@@ -6,16 +6,18 @@
 <style>
     .batch-progress-panel {
         position: fixed;
-        left: 1rem;
-        bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-        width: min(360px, calc(100vw - 2rem));
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(420px, calc(100vw - 2rem));
         background: color-mix(in srgb, var(--bg-surface) 96%, #0f172a 4%);
         border: 1px solid var(--border-base);
         border-radius: var(--radius-lg);
-        box-shadow: 0 20px 50px rgba(15, 23, 42, 0.22);
-        padding: 1rem;
+        box-shadow: 0 24px 64px rgba(15, 23, 42, 0.26);
+        padding: 1.25rem;
         z-index: 9500;
         display: none;
+        text-align: center;
     }
 
     .batch-progress-panel.show {
@@ -23,70 +25,66 @@
     }
 
     .batch-progress-title {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-        margin-bottom: 0.75rem;
-        font-weight: 600;
-    }
-
-    .batch-progress-meta {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .batch-progress-stat {
-        padding: 0.65rem 0.75rem;
-        border-radius: var(--radius-md);
-        background: var(--bg-muted);
-        text-align: center;
-    }
-
-    .batch-progress-stat strong {
-        display: block;
         font-size: 1rem;
+        font-weight: 700;
         color: var(--text-main);
+        margin-bottom: 0.35rem;
     }
 
-    .batch-progress-stat span {
-        font-size: 0.78rem;
-        color: var(--text-muted);
+    .batch-progress-percent {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--text-main);
+        margin-bottom: 1rem;
     }
 
     .batch-progress-bar {
         width: 100%;
-        height: 10px;
+        height: 12px;
         border-radius: 999px;
         background: var(--bg-muted);
         overflow: hidden;
-        margin-bottom: 0.65rem;
+        margin-bottom: 0.9rem;
+        position: relative;
     }
 
     .batch-progress-bar-inner {
         height: 100%;
         width: 0%;
-        background: linear-gradient(90deg, var(--info), var(--success));
-        transition: width 0.2s ease;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--info), var(--success), var(--info));
+        background-size: 200% 100%;
+        transition: width 0.28s ease;
+        animation: batch-progress-shimmer 1.4s linear infinite;
     }
 
     .batch-progress-text {
-        font-size: 0.85rem;
+        font-size: 0.92rem;
         color: var(--text-muted);
-        line-height: 1.5;
+        line-height: 1.6;
     }
 
     .batch-progress-text strong {
         color: var(--text-main);
     }
 
+    @keyframes batch-progress-shimmer {
+        0% {
+            background-position: 200% 0;
+        }
+        100% {
+            background-position: 0 0;
+        }
+    }
+
     @media (max-width: 640px) {
         .batch-progress-panel {
-            left: 0.75rem;
-            right: 0.75rem;
-            width: auto;
+            width: calc(100vw - 1.5rem);
+            padding: 1rem;
+        }
+
+        .batch-progress-percent {
+            font-size: 1.5rem;
         }
     }
 </style>
@@ -154,28 +152,12 @@
 </div>
 
 <div id="batchRefreshProgress" class="batch-progress-panel" aria-live="polite" aria-atomic="true">
-    <div class="batch-progress-title">
-        <span>批量刷新进度</span>
-        <span id="batchRefreshProgressPercent" class="text-muted">0%</span>
-    </div>
-    <div class="batch-progress-meta">
-        <div class="batch-progress-stat">
-            <strong id="batchRefreshProgressCurrent">0 / 0</strong>
-            <span>当前进度</span>
-        </div>
-        <div class="batch-progress-stat">
-            <strong id="batchRefreshProgressSuccess">0</strong>
-            <span>成功</span>
-        </div>
-        <div class="batch-progress-stat">
-            <strong id="batchRefreshProgressFailed">0</strong>
-            <span>失败</span>
-        </div>
-    </div>
+    <div class="batch-progress-title">正在刷新中</div>
+    <div id="batchRefreshProgressPercent" class="batch-progress-percent">0%</div>
     <div class="batch-progress-bar">
         <div id="batchRefreshProgressBar" class="batch-progress-bar-inner"></div>
     </div>
-    <div id="batchRefreshProgressText" class="batch-progress-text">等待开始…</div>
+    <div id="batchRefreshProgressText" class="batch-progress-text">正在刷新中，请稍候…</div>
 </div>
 
 <!-- Team 列表 -->
@@ -1071,24 +1053,17 @@
     }
 
     function updateBatchRefreshProgress({ current, total, success, failed, text }) {
-        const panel = document.getElementById('batchRefreshProgress');
-        const currentNode = document.getElementById('batchRefreshProgressCurrent');
-        const successNode = document.getElementById('batchRefreshProgressSuccess');
-        const failedNode = document.getElementById('batchRefreshProgressFailed');
         const barNode = document.getElementById('batchRefreshProgressBar');
         const percentNode = document.getElementById('batchRefreshProgressPercent');
         const textNode = document.getElementById('batchRefreshProgressText');
-        if (!panel || !currentNode || !successNode || !failedNode || !barNode || !percentNode || !textNode) return;
+        if (!barNode || !percentNode || !textNode) return;
 
         const safeTotal = total > 0 ? total : 1;
         const percent = Math.max(0, Math.min(100, Math.round((current / safeTotal) * 100)));
 
-        currentNode.textContent = `${Math.min(current, total)} / ${total}`;
-        successNode.textContent = `${success}`;
-        failedNode.textContent = `${failed}`;
         barNode.style.width = `${percent}%`;
         percentNode.textContent = `${percent}%`;
-        textNode.innerHTML = text;
+        textNode.innerHTML = text || `正在刷新中（<strong>${Math.min(current, total)}</strong> / <strong>${total}</strong>），成功 ${success}，失败 ${failed}。`;
     }
 
     function showBatchRefreshProgress() {
@@ -1160,7 +1135,7 @@
             total: selectedIds.length,
             success: 0,
             failed: 0,
-            text: `准备开始，共 <strong>${selectedIds.length}</strong> 个 Team…`
+            text: `正在刷新中，共 <strong>${selectedIds.length}</strong> 个 Team，请稍候…`
         });
         showToast(`开始批量刷新，共 ${selectedIds.length} 个 Team`, 'info');
 
@@ -1208,7 +1183,7 @@
                             total: data.total || selectedIds.length,
                             success: data.success_count || 0,
                             failed: data.failed_count || 0,
-                            text: `服务端已开始顺序刷新，共 <strong>${data.total || selectedIds.length}</strong> 个 Team…`
+                            text: `正在刷新中，共 <strong>${data.total || selectedIds.length}</strong> 个 Team，请稍候…`
                         });
                     } else if (data.type === 'progress') {
                         updateBatchRefreshProgress({
@@ -1216,7 +1191,7 @@
                             total: data.total || selectedIds.length,
                             success: data.success_count || 0,
                             failed: data.failed_count || 0,
-                            text: `服务端正在刷新第 <strong>${data.current || 0}</strong> / <strong>${data.total || selectedIds.length}</strong> 个 Team（ID: ${data.team_id || '-'}）…`
+                            text: `正在刷新中（<strong>${data.current || 0}</strong> / <strong>${data.total || selectedIds.length}</strong>），成功 ${data.success_count || 0}，失败 ${data.failed_count || 0}。`
                         });
                     } else if (data.type === 'finish') {
                         finalResult = data;
@@ -1237,10 +1212,14 @@
                 }
             }
 
-            const successCount = finalResult?.success_count || 0;
-            const failedCount = finalResult?.failed_count || 0;
+            if (!finalResult) {
+                throw new Error('批量刷新连接已中断，未收到完成信号，请检查网络或稍后重试');
+            }
+
+            const successCount = finalResult.success_count || 0;
+            const failedCount = finalResult.failed_count || 0;
             showToast(
-                finalResult?.message || `批量刷新完成：成功 ${successCount}，失败 ${failedCount}`,
+                finalResult.message || `批量刷新完成：成功 ${successCount}，失败 ${failedCount}`,
                 failedCount > 0 ? 'warning' : 'success'
             );
             setTimeout(() => location.reload(), 1500);
