@@ -243,7 +243,7 @@
                         {% endif %}
                     </span>
                 </button>
-                <div id="statusFilterDropdown" class="dropdown-menu">
+                <div id="statusFilterDropdown" class="dropdown-menu dropdown-menu-floating">
                     <div class="dropdown-header">选择状态</div>
                     <div class="dropdown-item" onclick="filterByStatus('')">
                         <span class="text-muted">所有状态</span>
@@ -1027,15 +1027,50 @@
         });
     }
 
+    function positionFloatingDropdown(menu) {
+        if (!menu || !menu.classList.contains('dropdown-menu-floating')) return;
+
+        const wrapper = menu.closest('.dropdown-wrapper');
+        const toggleButton = wrapper ? wrapper.querySelector('.dropdown-toggle') : null;
+        if (!toggleButton) return;
+
+        const buttonRect = toggleButton.getBoundingClientRect();
+        const viewportPadding = 16;
+        const menuWidth = Math.min(260, window.innerWidth - viewportPadding * 2);
+        const availableRight = window.innerWidth - viewportPadding;
+        const left = Math.min(
+            Math.max(buttonRect.left, viewportPadding),
+            availableRight - menuWidth
+        );
+
+        menu.style.position = 'fixed';
+        menu.style.top = `${buttonRect.bottom + 8}px`;
+        menu.style.left = `${left}px`;
+        menu.style.right = 'auto';
+        menu.style.width = `${menuWidth}px`;
+        menu.style.maxWidth = `${window.innerWidth - viewportPadding * 2}px`;
+    }
+
     function toggleDropdown(id) {
         const el = document.getElementById(id);
-        if (el) {
-            el.classList.toggle('show');
-            document.querySelectorAll('.dropdown-menu').forEach(d => {
-                if (d.id !== id) d.classList.remove('show');
-            });
+        if (!el) return;
+
+        const shouldShow = !el.classList.contains('show');
+        document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.remove('show'));
+
+        if (shouldShow) {
+            positionFloatingDropdown(el);
+            el.classList.add('show');
         }
     }
+
+    window.addEventListener('resize', () => {
+        document.querySelectorAll('.dropdown-menu.show.dropdown-menu-floating').forEach(positionFloatingDropdown);
+    });
+
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.dropdown-menu.show.dropdown-menu-floating').forEach(positionFloatingDropdown);
+    }, true);
 
     // Close dropdowns
     document.addEventListener('click', (e) => {
