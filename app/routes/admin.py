@@ -120,6 +120,11 @@ class BulkCodeUpdateRequest(BaseModel):
     warranty_days: Optional[int] = Field(None, description="质保天数")
 
 
+class InvalidCodeCleanupRequest(BaseModel):
+    """无效兑换码清理请求"""
+    codes: List[str] = Field(..., description="待清理的无效兑换码列表")
+
+
 class BulkActionRequest(BaseModel):
     """批量操作请求"""
     ids: List[int] = Field(..., description="Team ID 列表")
@@ -1271,6 +1276,47 @@ async def delete_code(
                 "success": False,
                 "error": "删除失败，请稍后重试"
             }
+        )
+
+
+@router.get("/codes/invalid/scan")
+async def scan_invalid_codes(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """扫描可安全清理的无效兑换码。"""
+    try:
+        result = await redemption_service.get_invalid_code_candidates(db, pool_type="normal")
+        status_code = status.HTTP_200_OK if result["success"] else status.HTTP_400_BAD_REQUEST
+        return JSONResponse(status_code=status_code, content=result)
+    except Exception:
+        logger.exception("扫描无效兑换码失败")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "扫描无效兑换码失败，请稍后重试"}
+        )
+
+
+@router.post("/codes/invalid/cleanup")
+async def cleanup_invalid_codes(
+    cleanup_data: InvalidCodeCleanupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """批量清理扫描出的无效兑换码。"""
+    try:
+        result = await redemption_service.cleanup_invalid_codes(
+            cleanup_data.codes,
+            db,
+            pool_type="normal"
+        )
+        status_code = status.HTTP_200_OK if result["success"] else status.HTTP_400_BAD_REQUEST
+        return JSONResponse(status_code=status_code, content=result)
+    except Exception:
+        logger.exception("清理无效兑换码失败")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "清理无效兑换码失败，请稍后重试"}
         )
 
 
