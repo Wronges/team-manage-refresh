@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 WARRANTY_EXPIRATION_MODE_FIRST_USE = "first_use"
 WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM = "refresh_on_redeem"
 DEFAULT_WARRANTY_EXPIRATION_MODE = WARRANTY_EXPIRATION_MODE_FIRST_USE
+DEFAULT_WARRANTY_DAYS = 30
+MIN_WARRANTY_DAYS = 1
+MAX_WARRANTY_DAYS = 3650
 VALID_WARRANTY_EXPIRATION_MODES = {
     WARRANTY_EXPIRATION_MODE_FIRST_USE,
     WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM,
@@ -48,6 +51,14 @@ class SettingsService:
         if normalized in VALID_UI_THEMES:
             return normalized
         return DEFAULT_UI_THEME
+
+    @staticmethod
+    def normalize_warranty_days(days: Optional[int | str]) -> int:
+        try:
+            value = int(str(days).strip())
+        except Exception:
+            value = DEFAULT_WARRANTY_DAYS
+        return max(MIN_WARRANTY_DAYS, min(MAX_WARRANTY_DAYS, value))
 
     async def get_setting(self, session: AsyncSession, key: str, default: Optional[str] = None) -> Optional[str]:
         """
@@ -255,6 +266,14 @@ class SettingsService:
             DEFAULT_WARRANTY_EXPIRATION_MODE,
         )
         return self.normalize_warranty_expiration_mode(raw_value)
+
+    async def get_default_warranty_days(self, session: AsyncSession) -> int:
+        raw_value = await self.get_setting(
+            session,
+            "default_warranty_days",
+            str(DEFAULT_WARRANTY_DAYS),
+        )
+        return self.normalize_warranty_days(raw_value)
 
 
 # 创建全局实例

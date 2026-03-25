@@ -20,6 +20,7 @@ from app.services.chatgpt import chatgpt_service
 from app.services.settings import (
     settings_service,
     DEFAULT_WARRANTY_EXPIRATION_MODE,
+    DEFAULT_WARRANTY_DAYS,
     DEFAULT_UI_THEME,
 )
 from app.services.cliproxyapi import cliproxyapi_service
@@ -44,6 +45,10 @@ async def resolve_ui_theme(db: AsyncSession) -> str:
     return settings_service.normalize_ui_theme(
         await settings_service.get_setting(db, "ui_theme", DEFAULT_UI_THEME)
     )
+
+
+async def resolve_default_warranty_days(db: AsyncSession) -> int:
+    return await settings_service.get_default_warranty_days(db)
 
 
 
@@ -173,12 +178,13 @@ async def admin_dashboard(
         }
 
         return templates.TemplateResponse(
+            request,
             "admin/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "dashboard",
                 "ui_theme": await resolve_ui_theme(db),
+                "default_warranty_days": await resolve_default_warranty_days(db),
                 "teams": teams_result.get("teams", []),
                 "stats": stats,
                 "search": search,
@@ -240,12 +246,13 @@ async def welfare_dashboard(
         }
 
         return templates.TemplateResponse(
+            request,
             "admin/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "welfare",
                 "ui_theme": await resolve_ui_theme(db),
+                "default_warranty_days": await resolve_default_warranty_days(db),
                 "teams": teams_result.get("teams", []),
                 "stats": stats,
                 "search": search,
@@ -1234,12 +1241,13 @@ async def codes_list_page(
                 code["used_at"] = dt.strftime("%Y-%m-%d %H:%M")
 
         return templates.TemplateResponse(
+            request,
             "admin/codes/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "codes",
                 "ui_theme": await resolve_ui_theme(db),
+                "default_warranty_days": await resolve_default_warranty_days(db),
                 "codes": codes,
                 "stats": stats,
                 "search": search,
@@ -1735,12 +1743,13 @@ async def records_page(
                 pass
 
         return templates.TemplateResponse(
+            request,
             "admin/records/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "records",
                 "ui_theme": await resolve_ui_theme(db),
+                "default_warranty_days": await resolve_default_warranty_days(db),
                 "records": paginated_records,
                 "stats": stats,
                 "filters": {
@@ -1835,9 +1844,9 @@ async def settings_page(
         log_level = await settings_service.get_log_level(db)
 
         return templates.TemplateResponse(
+            request,
             "admin/settings/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "settings",
                 "ui_theme": await resolve_ui_theme(db),
@@ -1857,7 +1866,7 @@ async def settings_page(
                 "cliproxyapi_base_url": await settings_service.get_setting(db, "cliproxyapi_base_url", ""),
                 "cliproxyapi_api_key": await settings_service.get_setting(db, "cliproxyapi_api_key", ""),
                 "warranty_expiration_mode": await settings_service.get_warranty_expiration_mode(db),
-                "ui_theme": settings_service.normalize_ui_theme(await settings_service.get_setting(db, "ui_theme", DEFAULT_UI_THEME)),
+                "default_warranty_days": await settings_service.get_default_warranty_days(db),
             }
         )
 
@@ -1917,6 +1926,14 @@ class WarrantyExpirationSettingsRequest(BaseModel):
     expiration_mode: Literal["first_use", "refresh_on_redeem"] = Field(
         DEFAULT_WARRANTY_EXPIRATION_MODE,
         description="质保时长计算模式"
+    )
+
+
+    default_warranty_days: int = Field(
+        DEFAULT_WARRANTY_DAYS,
+        ge=1,
+        le=3650,
+        description="绯荤粺榛樿璐ㄤ繚澶╂暟"
     )
 
 
@@ -1989,12 +2006,13 @@ async def announcement_page(
         announcement_markdown = await settings_service.get_setting(db, "announcement_markdown", "")
 
         return templates.TemplateResponse(
+            request,
             "admin/announcement/index.html",
             {
-                "request": request,
                 "user": current_user,
                 "active_page": "announcement",
                 "ui_theme": await resolve_ui_theme(db),
+                "default_warranty_days": await resolve_default_warranty_days(db),
                 "announcement_enabled": announcement_enabled,
                 "announcement_markdown": announcement_markdown,
             }
@@ -2297,12 +2315,17 @@ async def update_warranty_settings(
         expiration_mode = settings_service.normalize_warranty_expiration_mode(
             warranty_data.expiration_mode
         )
+        default_warranty_days = settings_service.normalize_warranty_days(
+            warranty_data.default_warranty_days
+        )
         logger.info("管理员更新质保计算模式: %s", expiration_mode)
 
-        success = await settings_service.update_setting(
+        success = await settings_service.update_settings(
             db,
-            "warranty_expiration_mode",
-            expiration_mode,
+            {
+                "warranty_expiration_mode": expiration_mode,
+                "default_warranty_days": str(default_warranty_days),
+            },
         )
         if not success:
             return JSONResponse(
@@ -2320,6 +2343,7 @@ async def update_warranty_settings(
                 "success": True,
                 "message": message,
                 "expiration_mode": expiration_mode,
+                "default_warranty_days": default_warranty_days,
             }
         )
     except Exception as e:

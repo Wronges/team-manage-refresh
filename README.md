@@ -417,3 +417,9 @@ python init_db.py
 ---
 
 **注意**: 本系统仅用于合法的 ChatGPT Team 账号管理，请遵守 OpenAI 的服务条款。
+## Attribution
+
+This repository contains secondary modifications based on the upstream project:
+https://github.com/loLollipop/team-manage-refresh
+
+Please retain attribution to the original upstream source when redistributing or modifying this project.

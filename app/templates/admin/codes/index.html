@@ -314,7 +314,7 @@
                 <div class="form-group" id="bulk-edit-warranty-days-group" style="display: none;">
                     <label>质保时长 (天) *</label>
                     <input type="number" id="bulk-edit-warranty-days" name="warrantyDays" class="form-control"
-                        value="30" min="1" max="3650">
+                          value="{{ default_warranty_days|default(30, true) }}" min="1" max="3650">
                 </div>
                 <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">保存修改</button>
             </form>
@@ -346,7 +346,7 @@
                 </div>
                 <div class="form-group" id="edit-warranty-days-group" style="display: none;">
                     <label>质保时长 (天) *</label>
-                    <input type="number" id="edit-warranty-days" name="warrantyDays" class="form-control" value="30"
+                    <input type="number" id="edit-warranty-days" name="warrantyDays" class="form-control" value="{{ default_warranty_days|default(30, true) }}"
                         min="1" max="3650">
                 </div>
                 <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">保存修改</button>

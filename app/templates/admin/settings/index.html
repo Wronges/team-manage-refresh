@@ -175,6 +175,13 @@
 
     <form id="warrantySettingsForm" class="settings-form">
         <div class="form-group">
+            <label for="defaultWarrantyDays">默认质保天数</label>
+            <input type="number" id="defaultWarrantyDays" name="default_warranty_days"
+                value="{{ default_warranty_days or '30' }}" min="1" max="3650" class="form-control">
+            <p class="form-help">新生成的质保兑换码默认使用这个天数。已经生成过的兑换码不会被自动修改。</p>
+        </div>
+
+        <div class="form-group">
             <label for="warrantyExpirationMode">质保时长计算方式</label>
             <select id="warrantyExpirationMode" name="expiration_mode" class="form-control">
                 <option value="first_use" {% if (warranty_expiration_mode or 'first_use') == 'first_use' %}selected{% endif %}>
@@ -539,6 +546,7 @@
         e.preventDefault();
 
         const expiration_mode = document.getElementById('warrantyExpirationMode').value;
+        const default_warranty_days = parseInt(document.getElementById('defaultWarrantyDays').value, 10);
 
         try {
             const response = await fetch('/admin/settings/warranty', {
@@ -546,7 +554,7 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ expiration_mode })
+                body: JSON.stringify({ expiration_mode, default_warranty_days })
             });
 
             const data = await response.json();
