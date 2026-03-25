@@ -96,7 +96,7 @@
 
                         <div class="info-box">
                             <i data-lucide="clipboard-check" class="info-icon"></i>
-                            <p>质保期为 <strong>一个月</strong>，在有效期内可用原兑换码重新加入 Team。</p>
+                            <p>质保期为 <strong>{{ default_warranty_days|default(30, true) }} 天</strong>，在有效期内可用原兑换码重新加入 Team。</p>
                         </div>
 
                         <div class="warranty-query-row">
