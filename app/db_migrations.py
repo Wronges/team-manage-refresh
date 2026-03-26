@@ -176,6 +176,65 @@ def run_auto_migration():
             ON team_email_mappings (team_id, status)
         """)
 
+        if not table_exists(cursor, "shop_products"):
+            logger.info("create shop_products")
+            cursor.execute("""
+                CREATE TABLE shop_products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(120) NOT NULL,
+                    description TEXT,
+                    badge VARCHAR(50),
+                    price_cents INTEGER NOT NULL DEFAULT 0,
+                    inventory INTEGER NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1,
+                    has_warranty BOOLEAN DEFAULT 0,
+                    warranty_days INTEGER DEFAULT 30,
+                    expires_days INTEGER,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """)
+            migrations_applied.append("shop_products")
+
+        if not table_exists(cursor, "shop_orders"):
+            logger.info("create shop_orders")
+            cursor.execute("""
+                CREATE TABLE shop_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_no VARCHAR(40) NOT NULL UNIQUE,
+                    product_id INTEGER NOT NULL,
+                    customer_email VARCHAR(255) NOT NULL,
+                    amount_cents INTEGER NOT NULL DEFAULT 0,
+                    status VARCHAR(30) NOT NULL DEFAULT 'pending_payment',
+                    payment_method VARCHAR(20),
+                    payment_reference VARCHAR(120),
+                    customer_note TEXT,
+                    admin_note TEXT,
+                    assigned_code VARCHAR(32),
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    paid_at DATETIME,
+                    completed_at DATETIME,
+                    FOREIGN KEY(product_id) REFERENCES shop_products(id),
+                    FOREIGN KEY(assigned_code) REFERENCES redemption_codes(code)
+                )
+            """)
+            migrations_applied.append("shop_orders")
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_shop_product_active_sort
+            ON shop_products (is_active, sort_order)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_shop_order_status_created
+            ON shop_orders (status, created_at)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_shop_order_email
+            ON shop_orders (customer_email)
+        """)
+
         # 提交更改
         conn.commit()
         

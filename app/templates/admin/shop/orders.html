@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}订单管理 - GPT Team 管理系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>订单管理</h2>
+</div>
+
+<div class="content-section">
+    <form method="get" class="search-form">
+        <div class="input-group-clean">
+            <select name="status" class="form-control">
+                <option value="">全部状态</option>
+                <option value="pending_payment" {% if status_filter == 'pending_payment' %}selected{% endif %}>待付款</option>
+                <option value="pending_review" {% if status_filter == 'pending_review' %}selected{% endif %}>待审核</option>
+                <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>已完成</option>
+                <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>已驳回</option>
+            </select>
+            <button type="submit" class="btn btn-primary">筛选</button>
+        </div>
+    </form>
+</div>
+
+<div class="content-section">
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>订单号</th>
+                    <th>商品</th>
+                    <th>邮箱</th>
+                    <th>金额</th>
+                    <th>状态</th>
+                    <th>支付方式</th>
+                    <th>付款凭证</th>
+                    <th>发放兑换码</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in orders %}
+                <tr>
+                    <td>{{ order.order_no }}</td>
+                    <td>{{ order.product.name if order.product else '-' }}</td>
+                    <td>{{ order.customer_email }}</td>
+                    <td>¥{{ cents_to_yuan(order.amount_cents) }}</td>
+                    <td>{{ order.status }}</td>
+                    <td>{{ order.payment_method or '-' }}</td>
+                    <td>{{ order.payment_reference or '-' }}</td>
+                    <td>{{ order.assigned_code or '-' }}</td>
+                    <td>
+                        {% if order.status != 'completed' %}
+                        <button class="btn btn-secondary btn-sm" onclick="approveOrder({{ order.id }})">审核通过并发码</button>
+                        <button class="btn btn-secondary btn-sm" onclick="rejectOrder({{ order.id }})">驳回</button>
+                        {% else %}
+                        <span class="text-muted">已完成</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+async function orderAction(url, adminNote) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_note: adminNote || '' })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || '请求失败');
+}
+
+async function approveOrder(orderId) {
+    const note = prompt('审核备注，可留空', '') || '';
+    try {
+        await orderAction(`/admin/shop/orders/${orderId}/approve`, note);
+        location.reload();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+async function rejectOrder(orderId) {
+    const note = prompt('请输入驳回原因', '') || '';
+    try {
+        await orderAction(`/admin/shop/orders/${orderId}/reject`, note);
+        location.reload();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+</script>
+{% endblock %}

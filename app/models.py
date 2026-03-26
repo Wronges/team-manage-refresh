@@ -141,6 +141,59 @@ class RedemptionRecord(Base):
     )
 
 
+class ShopProduct(Base):
+    """商品表"""
+    __tablename__ = "shop_products"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, comment="商品名称")
+    description = Column(Text, comment="商品描述")
+    badge = Column(String(50), comment="商品徽标文案")
+    price_cents = Column(Integer, nullable=False, default=0, comment="价格，单位分")
+    inventory = Column(Integer, nullable=False, default=0, comment="库存")
+    sort_order = Column(Integer, nullable=False, default=0, comment="排序")
+    is_active = Column(Boolean, default=True, comment="是否上架")
+    has_warranty = Column(Boolean, default=False, comment="是否为质保商品")
+    warranty_days = Column(Integer, default=30, comment="默认质保天数")
+    expires_days = Column(Integer, comment="兑换码有效期天数")
+    created_at = Column(DateTime, default=get_now, comment="创建时间")
+    updated_at = Column(DateTime, default=get_now, onupdate=get_now, comment="更新时间")
+
+    orders = relationship("ShopOrder", back_populates="product")
+
+    __table_args__ = (
+        Index("idx_shop_product_active_sort", "is_active", "sort_order"),
+    )
+
+
+class ShopOrder(Base):
+    """订单表"""
+    __tablename__ = "shop_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_no = Column(String(40), unique=True, nullable=False, comment="订单号")
+    product_id = Column(Integer, ForeignKey("shop_products.id"), nullable=False, comment="商品ID")
+    customer_email = Column(String(255), nullable=False, comment="客户邮箱")
+    amount_cents = Column(Integer, nullable=False, default=0, comment="订单金额，单位分")
+    status = Column(String(30), nullable=False, default="pending_payment", comment="订单状态")
+    payment_method = Column(String(20), comment="支付方式")
+    payment_reference = Column(String(120), comment="付款凭证")
+    customer_note = Column(Text, comment="客户备注")
+    admin_note = Column(Text, comment="管理员备注")
+    assigned_code = Column(String(32), ForeignKey("redemption_codes.code"), comment="发放的兑换码")
+    created_at = Column(DateTime, default=get_now, comment="创建时间")
+    updated_at = Column(DateTime, default=get_now, onupdate=get_now, comment="更新时间")
+    paid_at = Column(DateTime, comment="提交付款时间")
+    completed_at = Column(DateTime, comment="完成时间")
+
+    product = relationship("ShopProduct", back_populates="orders")
+
+    __table_args__ = (
+        Index("idx_shop_order_status_created", "status", "created_at"),
+        Index("idx_shop_order_email", "customer_email"),
+    )
+
+
 class Setting(Base):
     """系统设置表"""
     __tablename__ = "settings"

@@ -5,6 +5,7 @@
 {% block content %}
 <div class="page-header">
     <h2>系统设置</h2>
+    <a href="#settings-shop-payment" class="settings-nav-pill settings-nav-link" data-target="settings-shop-payment">商城支付</a>
 </div>
 <div class="settings-top-nav">
     <a href="#settings-proxy" class="settings-nav-pill settings-nav-link" data-target="settings-proxy">代理配置</a>
@@ -214,6 +215,40 @@
         </div>
 
         <button type="submit" class="btn btn-primary">保存 Team 导入配置</button>
+    </form>
+</div>
+
+<!-- 商城支付 -->
+<div class="content-section settings-panel" id="settings-shop-payment">
+    <div class="section-header">
+        <h3>商城支付</h3>
+    </div>
+
+    <form id="shopPaymentForm" class="settings-form">
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="shopEnabled" {% if shop_enabled %}checked{% endif %}>
+                <span>启用购买页</span>
+            </label>
+            <p class="form-help">关闭后，兑换页将隐藏购买入口，购买页会提示暂未开放。</p>
+        </div>
+        <div class="form-group">
+            <label for="shopAlipayQrUrl">支付宝收款码图片链接</label>
+            <input type="text" id="shopAlipayQrUrl" class="form-control" value="{{ shop_alipay_qr_url or '' }}" placeholder="https://...">
+        </div>
+        <div class="form-group">
+            <label for="shopWechatQrUrl">微信收款码图片链接</label>
+            <input type="text" id="shopWechatQrUrl" class="form-control" value="{{ shop_wechat_qr_url or '' }}" placeholder="https://...">
+        </div>
+        <div class="form-group">
+            <label for="shopPaymentNotice">付款提示</label>
+            <textarea id="shopPaymentNotice" class="form-control" rows="3">{{ shop_payment_notice or '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="shopContactNotice">联系说明</label>
+            <textarea id="shopContactNotice" class="form-control" rows="3">{{ shop_contact_notice or '' }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">保存商城支付配置</button>
     </form>
 </div>
 
@@ -593,6 +628,36 @@
 
             if (response.ok && data.success) {
                 showToast(data.message || 'Team 导入配置已保存', 'success');
+            } else {
+                showToast(data.error || '保存失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+
+    // 商城支付配置表单
+    document.getElementById('shopPaymentForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        try {
+            const response = await fetch('/admin/shop/settings/payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    shop_enabled: document.getElementById('shopEnabled').checked,
+                    alipay_qr_url: document.getElementById('shopAlipayQrUrl').value.trim(),
+                    wechat_qr_url: document.getElementById('shopWechatQrUrl').value.trim(),
+                    payment_notice: document.getElementById('shopPaymentNotice').value.trim(),
+                    contact_notice: document.getElementById('shopContactNotice').value.trim()
+                })
+            });
+
+            const data = await response.json();
+            if (response.ok && data.success) {
+                showToast(data.message || '商城支付配置已保存', 'success');
             } else {
                 showToast(data.error || '保存失败', 'error');
             }

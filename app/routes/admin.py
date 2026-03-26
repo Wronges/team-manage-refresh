@@ -1867,6 +1867,11 @@ async def settings_page(
                 "cliproxyapi_api_key": await settings_service.get_setting(db, "cliproxyapi_api_key", ""),
                 "warranty_expiration_mode": await settings_service.get_warranty_expiration_mode(db),
                 "default_warranty_days": await settings_service.get_default_warranty_days(db),
+                "shop_enabled": str(await settings_service.get_setting(db, "shop_enabled", "true")).lower() in {"1", "true", "yes", "on"},
+                "shop_alipay_qr_url": await settings_service.get_setting(db, "shop_alipay_qr_url", ""),
+                "shop_wechat_qr_url": await settings_service.get_setting(db, "shop_wechat_qr_url", ""),
+                "shop_payment_notice": await settings_service.get_setting(db, "shop_payment_notice", ""),
+                "shop_contact_notice": await settings_service.get_setting(db, "shop_contact_notice", ""),
             }
         )
 
