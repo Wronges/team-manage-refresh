@@ -158,9 +158,9 @@ body {
   margin: 18px auto 0;
   max-width: 640px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
   border-radius: 18px;
   padding: 16px 18px;
   border: 1px solid rgba(56, 189, 248, 0.26);
@@ -172,7 +172,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  text-align: left;
+  text-align: center;
 }
 
 .purchase-entry-copy strong {
@@ -182,14 +182,13 @@ body {
 
 .purchase-entry-eyebrow {
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: #93c5fd;
 }
 
 .purchase-entry-btn {
-  white-space: nowrap;
-  flex-shrink: 0;
+  width: 100%;
+  justify-content: center;
 }
 
 .main-shell {
@@ -574,16 +573,7 @@ body {
   .tab-panel,
   .result-shell { padding: 20px; }
 
-  .purchase-entry-card {
-    flex-direction: column;
-    align-items: stretch;
-    text-align: left;
-  }
-
-  .purchase-entry-btn {
-    width: 100%;
-    justify-content: center;
-  }
+  .purchase-entry-card { padding: 14px 16px; }
 
   .warranty-query-row {
     flex-direction: column;

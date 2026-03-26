@@ -168,13 +168,19 @@ async def admin_dashboard(
         # 获取统计信息 (使用专用统计方法优化)
         team_stats = await team_service.get_stats(db, pool_type="normal")
         code_stats = await redemption_service.get_stats(db, pool_type="normal")
+        token_stats = await team_service.get_token_health_stats(db, pool_type="normal")
 
         # 计算统计数据
         stats = {
             "total_teams": team_stats["total"],
             "available_teams": team_stats["available"],
             "total_codes": code_stats["total"],
-            "used_codes": code_stats["used"]
+            "used_codes": code_stats["used"],
+            "token_at_valid": token_stats["at_valid"],
+            "token_auto_refresh_ready": token_stats["auto_refresh_ready"],
+            "token_expiring_soon": token_stats["expiring_soon"],
+            "token_missing_rt": token_stats["missing_rt"],
+            "token_missing_client_id": token_stats["missing_client_id"],
         }
 
         return templates.TemplateResponse(

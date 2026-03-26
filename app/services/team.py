@@ -45,6 +45,138 @@ class TeamService:
         self.token_parser = TokenParser()
         self.jwt_parser = JWTParser()
 
+    def _build_token_health(
+        self,
+        team: Team,
+        *,
+        fallback_client_id: Optional[str] = None,
+        refresh_window_hours: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        window_hours = refresh_window_hours or self.PROACTIVE_REFRESH_WINDOW_HOURS
+        now = get_now()
+        threshold_time = now + timedelta(hours=window_hours)
+
+        access_token = ""
+        access_token_error = None
+        access_token_expire_at = None
+        access_token_valid = False
+        access_token_expiring_soon = False
+
+        has_refresh_token = bool(team.refresh_token_encrypted)
+        has_session_token = bool(team.session_token_encrypted)
+        stored_client_id = str(team.client_id or "").strip()
+        token_client_id = ""
+
+        try:
+            access_token = encryption_service.decrypt_token(team.access_token_encrypted)
+        except Exception as exc:
+            access_token_error = str(exc)
+
+        if access_token:
+            try:
+                access_token_expire_at = self.jwt_parser.get_expiration_time(access_token)
+                access_token_valid = not self.jwt_parser.is_token_expired(access_token)
+                if access_token_expire_at and access_token_valid and access_token_expire_at <= threshold_time:
+                    access_token_expiring_soon = True
+            except Exception as exc:
+                access_token_error = str(exc)
+
+            try:
+                token_client_id = self.jwt_parser.extract_client_id(access_token) or ""
+            except Exception:
+                token_client_id = ""
+
+        effective_client_id = stored_client_id or token_client_id or str(fallback_client_id or "").strip()
+        rt_refresh_ready = bool(has_refresh_token and effective_client_id)
+        auto_refresh_ready = bool(rt_refresh_ready or has_session_token)
+
+        if access_token_valid and auto_refresh_ready and not access_token_expiring_soon:
+            health_state = "healthy"
+            health_label = "健康"
+        elif access_token_valid and auto_refresh_ready and access_token_expiring_soon:
+            health_state = "expiring"
+            health_label = "即将到期"
+        elif access_token_valid and not auto_refresh_ready:
+            health_state = "manual_only"
+            health_label = "仅手动可用"
+        elif not access_token_valid and auto_refresh_ready:
+            health_state = "needs_refresh"
+            health_label = "待刷新"
+        else:
+            health_state = "risk"
+            health_label = "高风险"
+
+        issues: List[str] = []
+        if not access_token_valid:
+            issues.append("AT无效")
+        if has_refresh_token and not effective_client_id:
+            issues.append("缺少client_id")
+        if not has_refresh_token:
+            issues.append("无RT")
+        if not has_session_token:
+            issues.append("无ST")
+
+        return {
+            "state": health_state,
+            "label": health_label,
+            "has_access_token": bool(access_token),
+            "access_token_valid": access_token_valid,
+            "access_token_expiring_soon": access_token_expiring_soon,
+            "access_token_expires_at": access_token_expire_at.isoformat() if access_token_expire_at else None,
+            "access_token_error": access_token_error,
+            "has_refresh_token": has_refresh_token,
+            "has_session_token": has_session_token,
+            "stored_client_id": bool(stored_client_id),
+            "effective_client_id": bool(effective_client_id),
+            "rt_refresh_ready": rt_refresh_ready,
+            "auto_refresh_ready": auto_refresh_ready,
+            "issues": issues,
+        }
+
+    async def get_token_health_stats(
+        self,
+        db_session: AsyncSession,
+        *,
+        pool_type: Optional[str] = None,
+        refresh_window_hours: Optional[int] = None,
+    ) -> Dict[str, int]:
+        stmt = select(Team)
+        if pool_type:
+            stmt = stmt.where(Team.pool_type == pool_type)
+
+        result = await db_session.execute(stmt)
+        teams = result.scalars().all()
+        from app.services.settings import settings_service
+        fallback_client_id = (await settings_service.get_setting(db_session, "token_refresh_client_id", "") or "").strip()
+
+        stats = {
+            "total": len(teams),
+            "at_valid": 0,
+            "auto_refresh_ready": 0,
+            "expiring_soon": 0,
+            "missing_rt": 0,
+            "missing_client_id": 0,
+        }
+
+        for team in teams:
+            health = self._build_token_health(
+                team,
+                fallback_client_id=fallback_client_id,
+                refresh_window_hours=refresh_window_hours,
+            )
+            if health["access_token_valid"]:
+                stats["at_valid"] += 1
+            if health["auto_refresh_ready"]:
+                stats["auto_refresh_ready"] += 1
+            if health["access_token_expiring_soon"]:
+                stats["expiring_soon"] += 1
+            if not health["has_refresh_token"]:
+                stats["missing_rt"] += 1
+            if health["has_refresh_token"] and not health["effective_client_id"]:
+                stats["missing_client_id"] += 1
+
+        return stats
+
     def _parse_remote_expires_at(self, expires_at_raw: Optional[str]) -> Optional[datetime]:
         """将 OpenAI 返回的 expires_at 解析为本地时区语义的 naive datetime。"""
         if not expires_at_raw:
@@ -2541,6 +2673,10 @@ class TeamService:
             # 构建返回数据 (不包含敏感信息)
             team_list = []
             for team in teams:
+                token_health = self._build_token_health(
+                    team,
+                    fallback_client_id=fallback_client_id,
+                )
                 team_list.append({
                     "id": team.id,
                     "team_name": team.team_name,
@@ -2701,7 +2837,9 @@ class TeamService:
         try:
             # 1. 构建查询语句
             stmt = select(Team)
-            
+            from app.services.settings import settings_service
+            fallback_client_id = (await settings_service.get_setting(db_session, "token_refresh_client_id", "") or "").strip()
+
             # 2. 如果有搜索词,添加过滤条件
             if search:
                 from sqlalchemy import or_, cast, String
@@ -2745,6 +2883,10 @@ class TeamService:
             # 构建返回数据
             team_list = []
             for team in teams:
+                token_health = self._build_token_health(
+                    team,
+                    fallback_client_id=fallback_client_id,
+                )
                 team_list.append({
                     "id": team.id,
                     "email": team.email,
@@ -2759,7 +2901,8 @@ class TeamService:
                     "device_code_auth_enabled": getattr(team, 'device_code_auth_enabled', False),
                     "last_sync": team.last_sync.isoformat() if team.last_sync else None,
                     "created_at": team.created_at.isoformat() if team.created_at else None,
-                    "pool_type": getattr(team, "pool_type", "normal")
+                    "pool_type": getattr(team, "pool_type", "normal"),
+                    "token_health": token_health,
                 })
 
             logger.info(f"获取所有 Team 列表成功: 第 {page} 页, 共 {len(team_list)} 个 / 总数 {total}")

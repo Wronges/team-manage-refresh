@@ -332,6 +332,35 @@
             <div class="stat-label">已使用兑换码</div>
         </div>
     </div>
+    <div class="stat-card stat-success">
+        <div class="stat-icon"><i data-lucide="shield-check"></i></div>
+        <div class="stat-info-group">
+            <div class="stat-value">{{ stats.token_at_valid or 0 }}</div>
+            <div class="stat-label">AT 当前有效</div>
+        </div>
+    </div>
+    <div class="stat-card stat-info">
+        <div class="stat-icon"><i data-lucide="refresh-cw"></i></div>
+        <div class="stat-info-group">
+            <div class="stat-value">{{ stats.token_auto_refresh_ready or 0 }}</div>
+            <div class="stat-label">可自动续期</div>
+        </div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-icon"><i data-lucide="clock-3"></i></div>
+        <div class="stat-info-group">
+            <div class="stat-value">{{ stats.token_expiring_soon or 0 }}</div>
+            <div class="stat-label">即将到期</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i data-lucide="key-round"></i></div>
+        <div class="stat-info-group">
+            <div class="stat-value">{{ stats.token_missing_rt or 0 }}</div>
+            <div class="stat-label">缺少 RT</div>
+            <div class="stat-sub-label">缺少 client_id {{ stats.token_missing_client_id or 0 }}</div>
+        </div>
+    </div>
     {% endif %}
 </div>
 
@@ -460,6 +489,7 @@
                 <th>到期时间</th>
                 <th>设备验证</th>
                 <th>状态</th>
+                <th>Token 健康</th>
                 <th>操作</th>
             </tr>
         </thead>
@@ -513,6 +543,33 @@
                         未知
                         {% endif %}
                     </span>
+                </td>
+                <td>
+                    {% set token_health = team.token_health or {} %}
+                    {% if token_health.state == 'healthy' %}
+                    <span class="status-badge status-active">{{ token_health.label }}</span>
+                    {% elif token_health.state == 'expiring' %}
+                    <span class="status-badge status-full">{{ token_health.label }}</span>
+                    {% elif token_health.state == 'manual_only' %}
+                    <span class="status-badge status-error">{{ token_health.label }}</span>
+                    {% elif token_health.state == 'needs_refresh' %}
+                    <span class="status-badge status-expired">{{ token_health.label }}</span>
+                    {% else %}
+                    <span class="status-badge status-banned">{{ token_health.label or '未知' }}</span>
+                    {% endif %}
+                    <div class="text-muted small" style="margin-top: 0.35rem;">
+                        AT: {{ '有效' if token_health.access_token_valid else '失效' }}
+                        / RT: {{ '有' if token_health.has_refresh_token else '无' }}
+                        / ST: {{ '有' if token_health.has_session_token else '无' }}
+                    </div>
+                    <div class="text-muted small">
+                        client_id: {{ '已就绪' if token_health.effective_client_id else '缺失' }}
+                    </div>
+                    {% if token_health.access_token_expires_at %}
+                    <div class="text-muted small">
+                        到期: {{ token_health.access_token_expires_at|format_datetime }}
+                    </div>
+                    {% endif %}
                 </td>
                 <td>
                     <div class="action-buttons">
