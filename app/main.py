@@ -20,7 +20,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from contextlib import asynccontextmanager
 # 导入路由
-from app.routes import redeem, auth, admin, api, user, warranty, shop, shop_admin
+from app.routes import redeem, auth, admin, api, user, warranty
 from app.config import settings
 from app.database import init_db, close_db, AsyncSessionLocal
 from app.services.auth import auth_service
@@ -358,12 +358,10 @@ logger = logging.getLogger(__name__)
 
 # 注册路由
 app.include_router(user.router)  # 用户路由(根路径)
-app.include_router(shop.router)
 app.include_router(redeem.router)
 app.include_router(warranty.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
-app.include_router(shop_admin.router)
 app.include_router(api.router)
 
 

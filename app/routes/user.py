@@ -44,8 +44,6 @@ async def redeem_page(
         announcement_markdown = await settings_service.get_setting(db, "announcement_markdown", "")
         ui_theme = settings_service.normalize_ui_theme(await settings_service.get_setting(db, "ui_theme", "ocean"))
         default_warranty_days = await settings_service.get_default_warranty_days(db)
-        shop_enabled_raw = await settings_service.get_setting(db, "shop_enabled", "true")
-        shop_enabled = str(shop_enabled_raw).lower() in {"1", "true", "yes", "on"}
 
         logger.info(f"用户访问兑换页面，剩余车位: {remaining_spots}")
 
@@ -59,7 +57,6 @@ async def redeem_page(
                 "welfare_remaining_spots": welfare_remaining_spots,
                 "ui_theme": ui_theme,
                 "default_warranty_days": default_warranty_days,
-                "shop_enabled": shop_enabled,
             }
         )
 
