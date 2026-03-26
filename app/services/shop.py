@@ -8,25 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import ShopOrder, ShopProduct
-from app.services.fulfillment import fulfillment_service
+from app.services.redemption import redemption_service
 from app.services.settings import settings_service
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
 
 
-SHOP_STATUS_CREATED = "created"
-SHOP_STATUS_PAYING = "paying"
-SHOP_STATUS_PAID = "paid"
-SHOP_STATUS_MANUAL_REVIEW = "manual_review"
-SHOP_STATUS_FULFILLED = "fulfilled"
-SHOP_STATUS_PENDING_PAYMENT = SHOP_STATUS_CREATED
-SHOP_STATUS_PENDING_REVIEW = SHOP_STATUS_MANUAL_REVIEW
-SHOP_STATUS_COMPLETED = SHOP_STATUS_FULFILLED
+SHOP_STATUS_PENDING_PAYMENT = "pending_payment"
+SHOP_STATUS_PENDING_REVIEW = "pending_review"
+SHOP_STATUS_COMPLETED = "completed"
 SHOP_STATUS_REJECTED = "rejected"
-SHOP_STATUS_PAYMENT_FAILED = "payment_failed"
-SHOP_STATUS_CLOSED = "closed"
-SHOP_STATUS_CANCELLED = SHOP_STATUS_CLOSED
+SHOP_STATUS_CANCELLED = "cancelled"
 
 
 class ShopService:
@@ -142,9 +135,7 @@ class ShopService:
             customer_email=customer_email.strip().lower(),
             amount_cents=product.price_cents,
             customer_note=customer_note.strip(),
-            status=SHOP_STATUS_CREATED,
-            payment_provider="manual",
-            payment_status="unpaid",
+            status=SHOP_STATUS_PENDING_PAYMENT,
         )
         db_session.add(order)
         await db_session.commit()
@@ -178,15 +169,14 @@ class ShopService:
         order = await self.get_order_by_no(db_session, order_no)
         if not order:
             return {"success": False, "error": "订单不存在"}
-        if order.status == SHOP_STATUS_FULFILLED:
+        if order.status == SHOP_STATUS_COMPLETED:
             return {"success": False, "error": "订单已完成"}
 
-        order.payment_provider = payment_method
         order.payment_method = payment_method
         order.payment_reference = payment_reference.strip()
         if customer_note.strip():
             order.customer_note = customer_note.strip()
-        order.status = SHOP_STATUS_MANUAL_REVIEW
+        order.status = SHOP_STATUS_PENDING_REVIEW
         order.paid_at = get_now()
         await db_session.commit()
         return {"success": True}
@@ -206,27 +196,40 @@ class ShopService:
         order = await self.get_order_by_id(db_session, order_id)
         if not order:
             return {"success": False, "error": "订单不存在"}
-        if order.status == SHOP_STATUS_FULFILLED:
+        if order.status == SHOP_STATUS_COMPLETED:
             return {"success": False, "error": "订单已完成"}
-        await fulfillment_service.mark_paid(
-            db_session,
-            order,
-            payment_provider=order.payment_provider or "manual",
-            paid_amount_cents=order.amount_cents,
-            payment_payload=order.payment_reference,
+
+        product = order.product
+        if not product:
+            return {"success": False, "error": "商品不存在"}
+        if product.inventory <= 0:
+            return {"success": False, "error": "商品库存不足"}
+
+        code_result = await redemption_service.generate_code_single(
+            db_session=db_session,
+            expires_days=product.expires_days,
+            has_warranty=product.has_warranty,
+            warranty_days=product.warranty_days,
+            pool_type="normal",
         )
-        return await fulfillment_service.fulfill_shop_order(
-            db_session,
-            order,
-            trigger="manual_review",
-            admin_note=admin_note,
-        )
+        if not code_result.get("success"):
+            return {"success": False, "error": code_result.get("error") or "生成兑换码失败"}
+
+        product.inventory = max(0, int(product.inventory) - 1)
+        order.assigned_code = code_result["code"]
+        order.status = SHOP_STATUS_COMPLETED
+        order.completed_at = get_now()
+        if not order.paid_at:
+            order.paid_at = get_now()
+        order.admin_note = admin_note.strip()
+        await db_session.commit()
+        return {"success": True, "assigned_code": order.assigned_code}
 
     async def reject_order(self, db_session: AsyncSession, *, order_id: int, admin_note: str = "") -> Dict[str, Any]:
         order = await self.get_order_by_id(db_session, order_id)
         if not order:
             return {"success": False, "error": "订单不存在"}
-        if order.status == SHOP_STATUS_FULFILLED:
+        if order.status == SHOP_STATUS_COMPLETED:
             return {"success": False, "error": "订单已完成，不能驳回"}
         order.status = SHOP_STATUS_REJECTED
         order.admin_note = admin_note.strip()

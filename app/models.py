@@ -176,36 +176,21 @@ class ShopOrder(Base):
     customer_email = Column(String(255), nullable=False, comment="客户邮箱")
     amount_cents = Column(Integer, nullable=False, default=0, comment="订单金额，单位分")
     status = Column(String(30), nullable=False, default="pending_payment", comment="订单状态")
-    payment_provider = Column(String(20), comment="支付渠道: manual/alipay/wechat")
-    payment_status = Column(String(20), nullable=False, default="unpaid", comment="支付状态")
-    payment_order_no = Column(String(50), comment="系统内部支付单号")
     payment_method = Column(String(20), comment="支付方式")
     payment_reference = Column(String(120), comment="付款凭证")
-    provider_trade_no = Column(String(100), comment="第三方交易号")
-    provider_buyer_id = Column(String(100), comment="第三方买家标识")
-    paid_amount_cents = Column(Integer, comment="实际支付金额，单位分")
-    payment_payload = Column(Text, comment="原始支付回调报文")
-    payment_error = Column(Text, comment="支付错误信息")
     customer_note = Column(Text, comment="客户备注")
     admin_note = Column(Text, comment="管理员备注")
     assigned_code = Column(String(32), ForeignKey("redemption_codes.code"), comment="发放的兑换码")
     created_at = Column(DateTime, default=get_now, comment="创建时间")
     updated_at = Column(DateTime, default=get_now, onupdate=get_now, comment="更新时间")
-    payment_created_at = Column(DateTime, comment="支付单创建时间")
-    payment_notified_at = Column(DateTime, comment="支付回调时间")
     paid_at = Column(DateTime, comment="提交付款时间")
-    fulfilled_at = Column(DateTime, comment="履约完成时间")
     completed_at = Column(DateTime, comment="完成时间")
-    fulfillment_error = Column(Text, comment="履约错误")
-    fulfillment_attempts = Column(Integer, nullable=False, default=0, comment="履约尝试次数")
 
     product = relationship("ShopProduct", back_populates="orders")
 
     __table_args__ = (
         Index("idx_shop_order_status_created", "status", "created_at"),
         Index("idx_shop_order_email", "customer_email"),
-        Index("idx_shop_order_payment_order_no", "payment_order_no"),
-        Index("idx_shop_order_provider_trade_no", "provider_trade_no"),
     )
 
 
