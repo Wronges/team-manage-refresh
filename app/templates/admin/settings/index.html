@@ -248,6 +248,38 @@
             <label for="shopContactNotice">联系说明</label>
             <textarea id="shopContactNotice" class="form-control" rows="3">{{ shop_contact_notice or '' }}</textarea>
         </div>
+        <hr>
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="paymentAlipayEnabled" {% if payment_alipay_enabled %}checked{% endif %}>
+                <span>启用支付宝自动支付</span>
+            </label>
+            <p class="form-help">这里只保存配置，不会提交到代码仓库。启用后，后续可直接接正式支付签名与回调。</p>
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayAppId">支付宝 App ID</label>
+            <input type="text" id="paymentAlipayAppId" class="form-control" value="{{ payment_alipay_app_id or '' }}" placeholder="202100xxxxxxxxxxxx">
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayGateway">支付宝网关</label>
+            <input type="text" id="paymentAlipayGateway" class="form-control" value="{{ payment_alipay_gateway or '' }}" placeholder="https://openapi.alipay.com/gateway.do">
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayNotifyUrl">异步回调地址 Notify URL</label>
+            <input type="text" id="paymentAlipayNotifyUrl" class="form-control" value="{{ payment_alipay_notify_url or '' }}" placeholder="https://your-domain.com/payment/alipay/notify">
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayReturnUrl">同步跳转地址 Return URL</label>
+            <input type="text" id="paymentAlipayReturnUrl" class="form-control" value="{{ payment_alipay_return_url or '' }}" placeholder="https://your-domain.com/shop/orders/{order_no}">
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayPrivateKey">商户应用私钥</label>
+            <textarea id="paymentAlipayPrivateKey" class="form-control" rows="6" placeholder="-----BEGIN PRIVATE KEY-----">{{ payment_alipay_private_key or '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="paymentAlipayPublicKey">支付宝公钥</label>
+            <textarea id="paymentAlipayPublicKey" class="form-control" rows="6" placeholder="支付宝开放平台提供的公钥">{{ payment_alipay_public_key or '' }}</textarea>
+        </div>
         <button type="submit" class="btn btn-primary">保存商城支付配置</button>
     </form>
 </div>
@@ -651,7 +683,14 @@
                     alipay_qr_url: document.getElementById('shopAlipayQrUrl').value.trim(),
                     wechat_qr_url: document.getElementById('shopWechatQrUrl').value.trim(),
                     payment_notice: document.getElementById('shopPaymentNotice').value.trim(),
-                    contact_notice: document.getElementById('shopContactNotice').value.trim()
+                    contact_notice: document.getElementById('shopContactNotice').value.trim(),
+                    payment_alipay_enabled: document.getElementById('paymentAlipayEnabled').checked,
+                    payment_alipay_app_id: document.getElementById('paymentAlipayAppId').value.trim(),
+                    payment_alipay_gateway: document.getElementById('paymentAlipayGateway').value.trim(),
+                    payment_alipay_notify_url: document.getElementById('paymentAlipayNotifyUrl').value.trim(),
+                    payment_alipay_return_url: document.getElementById('paymentAlipayReturnUrl').value.trim(),
+                    payment_alipay_private_key: document.getElementById('paymentAlipayPrivateKey').value.trim(),
+                    payment_alipay_public_key: document.getElementById('paymentAlipayPublicKey').value.trim()
                 })
             });
 

@@ -36,6 +36,13 @@ class PaymentSettingsRequest(BaseModel):
     wechat_qr_url: str = ""
     payment_notice: str = ""
     contact_notice: str = ""
+    payment_alipay_enabled: bool = False
+    payment_alipay_app_id: str = ""
+    payment_alipay_gateway: str = ""
+    payment_alipay_notify_url: str = ""
+    payment_alipay_return_url: str = ""
+    payment_alipay_private_key: str = ""
+    payment_alipay_public_key: str = ""
 
 
 class OrderActionRequest(BaseModel):
@@ -153,6 +160,13 @@ async def save_payment_settings(payload: PaymentSettingsRequest, db: AsyncSessio
             "shop_wechat_qr_url": payload.wechat_qr_url.strip(),
             "shop_payment_notice": payload.payment_notice.strip(),
             "shop_contact_notice": payload.contact_notice.strip(),
+            "payment_alipay_enabled": str(payload.payment_alipay_enabled).lower(),
+            "payment_alipay_app_id": payload.payment_alipay_app_id.strip(),
+            "payment_alipay_gateway": payload.payment_alipay_gateway.strip(),
+            "payment_alipay_notify_url": payload.payment_alipay_notify_url.strip(),
+            "payment_alipay_return_url": payload.payment_alipay_return_url.strip(),
+            "payment_alipay_private_key": payload.payment_alipay_private_key.strip(),
+            "payment_alipay_public_key": payload.payment_alipay_public_key.strip(),
         },
     )
     if not success:
