@@ -1872,13 +1872,6 @@ async def settings_page(
                 "shop_wechat_qr_url": await settings_service.get_setting(db, "shop_wechat_qr_url", ""),
                 "shop_payment_notice": await settings_service.get_setting(db, "shop_payment_notice", ""),
                 "shop_contact_notice": await settings_service.get_setting(db, "shop_contact_notice", ""),
-                "payment_alipay_enabled": str(await settings_service.get_setting(db, "payment_alipay_enabled", "false")).lower() in {"1", "true", "yes", "on"},
-                "payment_alipay_app_id": await settings_service.get_setting(db, "payment_alipay_app_id", ""),
-                "payment_alipay_gateway": await settings_service.get_setting(db, "payment_alipay_gateway", "https://openapi.alipay.com/gateway.do"),
-                "payment_alipay_notify_url": await settings_service.get_setting(db, "payment_alipay_notify_url", ""),
-                "payment_alipay_return_url": await settings_service.get_setting(db, "payment_alipay_return_url", ""),
-                "payment_alipay_private_key": await settings_service.get_setting(db, "payment_alipay_private_key", ""),
-                "payment_alipay_public_key": await settings_service.get_setting(db, "payment_alipay_public_key", ""),
             }
         )
 
