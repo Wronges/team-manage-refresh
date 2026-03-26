@@ -154,6 +154,44 @@ body {
   color: #93c5fd;
 }
 
+.purchase-entry-card {
+  margin: 18px auto 0;
+  max-width: 640px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(56, 189, 248, 0.26);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(79, 70, 229, 0.12));
+  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.22);
+}
+
+.purchase-entry-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.purchase-entry-copy strong {
+  font-size: 15px;
+  color: #eff6ff;
+}
+
+.purchase-entry-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.purchase-entry-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .main-shell {
   max-width: 640px;
   margin: 0 auto;
@@ -535,6 +573,17 @@ body {
   .page-wrap { padding: 28px 14px 48px; }
   .tab-panel,
   .result-shell { padding: 20px; }
+
+  .purchase-entry-card {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+  }
+
+  .purchase-entry-btn {
+    width: 100%;
+    justify-content: center;
+  }
 
   .warranty-query-row {
     flex-direction: column;

@@ -13,6 +13,7 @@
     <a href="#settings-refresh" class="settings-nav-pill settings-nav-link" data-target="settings-refresh">Token 预刷新</a>
     <a href="#settings-team-auto-refresh" class="settings-nav-pill settings-nav-link" data-target="settings-team-auto-refresh">Team 自动刷新</a>
     <a href="#settings-warranty" class="settings-nav-pill settings-nav-link" data-target="settings-warranty">质保设置</a>
+    <a href="#settings-purchase-entry" class="settings-nav-pill settings-nav-link" data-target="settings-purchase-entry">购买入口</a>
     <a href="#settings-team-import" class="settings-nav-pill settings-nav-link" data-target="settings-team-import">Team 导入</a>
     <a href="#settings-cliproxyapi" class="settings-nav-pill settings-nav-link" data-target="settings-cliproxyapi">CliproxyAPI 推送</a>
     <a href="#settings-ui-theme" class="settings-nav-pill settings-nav-link" data-target="settings-ui-theme">系统配色</a>
@@ -195,6 +196,32 @@
         </div>
 
         <button type="submit" class="btn btn-primary">保存质保设置</button>
+    </form>
+</div>
+
+
+<!-- 购买入口 -->
+<div class="content-section settings-panel" id="settings-purchase-entry">
+    <div class="section-header">
+        <h3>购买入口</h3>
+    </div>
+
+    <form id="purchaseEntryForm" class="settings-form">
+        <div class="form-group">
+            <label for="purchaseEntryUrl">购买链接</label>
+            <input type="text" id="purchaseEntryUrl" name="purchase_url" value="{{ purchase_entry_url or '' }}"
+                placeholder="https://pay.ldxp.cn/item/zaiv90" class="form-control">
+            <p class="form-help">用户在兑换页点击后会跳转到这个购买地址。留空则不显示购买入口。</p>
+        </div>
+
+        <div class="form-group">
+            <label for="purchaseEntryText">按钮文案</label>
+            <input type="text" id="purchaseEntryText" name="purchase_text" value="{{ purchase_entry_text or '没有兑换码？点此购买' }}"
+                maxlength="40" placeholder="没有兑换码？点此购买" class="form-control">
+            <p class="form-help">建议保持简短直接，避免超过一行。</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary">保存购买入口配置</button>
     </form>
 </div>
 
@@ -561,6 +588,39 @@
 
             if (response.ok && data.success) {
                 showToast(data.message || '质保设置已保存', 'success');
+            } else {
+                showToast(data.error || '保存失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    });
+
+    // 购买入口配置表单
+    document.getElementById('purchaseEntryForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const purchase_url = document.getElementById('purchaseEntryUrl').value.trim();
+        const purchase_text = document.getElementById('purchaseEntryText').value.trim();
+
+        if (purchase_url && !/^https?:\/\//i.test(purchase_url)) {
+            showToast('购买链接必须以 http:// 或 https:// 开头', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/admin/settings/purchase-entry', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ purchase_url, purchase_text })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                showToast(data.message || '购买入口配置已保存', 'success');
             } else {
                 showToast(data.error || '保存失败', 'error');
             }

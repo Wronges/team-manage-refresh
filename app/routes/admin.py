@@ -1867,6 +1867,8 @@ async def settings_page(
                 "cliproxyapi_api_key": await settings_service.get_setting(db, "cliproxyapi_api_key", ""),
                 "warranty_expiration_mode": await settings_service.get_warranty_expiration_mode(db),
                 "default_warranty_days": await settings_service.get_default_warranty_days(db),
+                "purchase_entry_url": await settings_service.get_setting(db, "purchase_entry_url", "https://pay.ldxp.cn/item/zaiv90"),
+                "purchase_entry_text": await settings_service.get_setting(db, "purchase_entry_text", "没有兑换码？点此购买"),
             }
         )
 
@@ -1935,6 +1937,11 @@ class WarrantyExpirationSettingsRequest(BaseModel):
         le=3650,
         description="绯荤粺榛樿璐ㄤ繚澶╂暟"
     )
+
+
+class PurchaseEntrySettingsRequest(BaseModel):
+    purchase_url: str = Field("", description="购买链接")
+    purchase_text: str = Field("没有兑换码？点此购买", description="购买入口文案")
 
 
 class UiThemeSettingsRequest(BaseModel):
@@ -2348,6 +2355,52 @@ async def update_warranty_settings(
         )
     except Exception as e:
         logger.exception("更新质保设置失败")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "更新失败，请稍后重试"}
+        )
+
+
+@router.post("/settings/purchase-entry")
+async def update_purchase_entry_settings(
+    purchase_data: PurchaseEntrySettingsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    try:
+        purchase_url = purchase_data.purchase_url.strip()
+        purchase_text = purchase_data.purchase_text.strip() or "没有兑换码？点此购买"
+
+        if purchase_url and not purchase_url.lower().startswith(("http://", "https://")):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"success": False, "error": "购买链接必须以 http:// 或 https:// 开头"}
+            )
+
+        success = await settings_service.update_settings(
+            db,
+            {
+                "purchase_entry_url": purchase_url,
+                "purchase_entry_text": purchase_text,
+            },
+        )
+
+        if success:
+            return JSONResponse(
+                content={
+                    "success": True,
+                    "message": "购买入口配置已保存",
+                    "purchase_url": purchase_url,
+                    "purchase_text": purchase_text,
+                }
+            )
+
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": "保存失败"}
+        )
+    except Exception:
+        logger.exception("更新购买入口配置失败")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"success": False, "error": "更新失败，请稍后重试"}

@@ -38,6 +38,17 @@
                     福利车位剩余 <span class="seats-count">{{ welfare_remaining_spots }}</span> 位
                 </div>
                 {% endif %}
+                {% if purchase_url %}
+                <div class="purchase-entry-card">
+                    <div class="purchase-entry-copy">
+                        <span class="purchase-entry-eyebrow">没有兑换码？</span>
+                        <strong>可直接前往购买页下单</strong>
+                    </div>
+                    <a href="{{ purchase_url }}" class="btn btn-primary purchase-entry-btn" target="_blank" rel="noopener noreferrer">
+                        <i data-lucide="shopping-bag"></i> {{ purchase_text or '没有兑换码？点此购买' }}
+                    </a>
+                </div>
+                {% endif %}
             </header>
 
             <section class="main-shell">
