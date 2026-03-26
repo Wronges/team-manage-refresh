@@ -222,6 +222,27 @@ def run_auto_migration():
             """)
             migrations_applied.append("shop_orders")
 
+        shop_order_columns = {
+            "payment_provider": "ALTER TABLE shop_orders ADD COLUMN payment_provider VARCHAR(20)",
+            "payment_status": "ALTER TABLE shop_orders ADD COLUMN payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'",
+            "payment_order_no": "ALTER TABLE shop_orders ADD COLUMN payment_order_no VARCHAR(50)",
+            "provider_trade_no": "ALTER TABLE shop_orders ADD COLUMN provider_trade_no VARCHAR(100)",
+            "provider_buyer_id": "ALTER TABLE shop_orders ADD COLUMN provider_buyer_id VARCHAR(100)",
+            "paid_amount_cents": "ALTER TABLE shop_orders ADD COLUMN paid_amount_cents INTEGER",
+            "payment_payload": "ALTER TABLE shop_orders ADD COLUMN payment_payload TEXT",
+            "payment_error": "ALTER TABLE shop_orders ADD COLUMN payment_error TEXT",
+            "payment_created_at": "ALTER TABLE shop_orders ADD COLUMN payment_created_at DATETIME",
+            "payment_notified_at": "ALTER TABLE shop_orders ADD COLUMN payment_notified_at DATETIME",
+            "fulfilled_at": "ALTER TABLE shop_orders ADD COLUMN fulfilled_at DATETIME",
+            "fulfillment_error": "ALTER TABLE shop_orders ADD COLUMN fulfillment_error TEXT",
+            "fulfillment_attempts": "ALTER TABLE shop_orders ADD COLUMN fulfillment_attempts INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, ddl in shop_order_columns.items():
+            if table_exists(cursor, "shop_orders") and not column_exists(cursor, "shop_orders", column_name):
+                logger.info("add shop_orders.%s", column_name)
+                cursor.execute(ddl)
+                migrations_applied.append(f"shop_orders.{column_name}")
+
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_shop_product_active_sort
             ON shop_products (is_active, sort_order)
@@ -233,6 +254,14 @@ def run_auto_migration():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_shop_order_email
             ON shop_orders (customer_email)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_shop_order_payment_order_no
+            ON shop_orders (payment_order_no)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_shop_order_provider_trade_no
+            ON shop_orders (provider_trade_no)
         """)
 
         # 提交更改
