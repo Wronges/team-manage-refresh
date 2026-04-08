@@ -24,7 +24,13 @@ from app.services.settings import (
     DEFAULT_UI_THEME,
 )
 from app.services.cliproxyapi import cliproxyapi_service
-from app.models import RedemptionCode, RedemptionRecord, Team
+from app.models import (
+    RedemptionCode,
+    RedemptionRecord,
+    Team,
+    WARRANTY_TYPE_DAYS,
+    WARRANTY_TYPE_USES,
+)
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -99,7 +105,9 @@ class CodeGenerateRequest(BaseModel):
     count: Optional[int] = Field(None, description="生成数量 (批量生成)")
     expires_days: Optional[int] = Field(None, description="有效期天数")
     has_warranty: bool = Field(False, description="是否为质保兑换码")
+    warranty_type: str = Field(WARRANTY_TYPE_DAYS, description="质保类型: days/uses")
     warranty_days: int = Field(30, description="质保天数")
+    warranty_uses: int = Field(1, description="质保次数")
 
 
 class TeamUpdateRequest(BaseModel):
@@ -119,13 +127,17 @@ class TeamUpdateRequest(BaseModel):
 class CodeUpdateRequest(BaseModel):
     """兑换码更新请求"""
     has_warranty: bool = Field(..., description="是否为质保兑换码")
+    warranty_type: Optional[str] = Field(None, description="质保类型: days/uses")
     warranty_days: Optional[int] = Field(None, description="质保天数")
+    warranty_uses: Optional[int] = Field(None, description="质保次数")
 
 class BulkCodeUpdateRequest(BaseModel):
     """批量兑换码更新请求"""
     codes: List[str] = Field(..., description="兑换码列表")
     has_warranty: bool = Field(..., description="是否为质保兑换码")
+    warranty_type: Optional[str] = Field(None, description="质保类型: days/uses")
     warranty_days: Optional[int] = Field(None, description="质保天数")
+    warranty_uses: Optional[int] = Field(None, description="质保次数")
 
 
 class InvalidCodeCleanupRequest(BaseModel):
@@ -1304,7 +1316,9 @@ async def generate_codes(
                 code=generate_data.code,
                 expires_days=generate_data.expires_days,
                 has_warranty=generate_data.has_warranty,
+                warranty_type=generate_data.warranty_type,
                 warranty_days=generate_data.warranty_days,
+                warranty_uses=generate_data.warranty_uses,
                 pool_type="normal"
             )
 
@@ -1332,7 +1346,9 @@ async def generate_codes(
                 count=generate_data.count,
                 expires_days=generate_data.expires_days,
                 has_warranty=generate_data.has_warranty,
+                warranty_type=generate_data.warranty_type,
                 warranty_days=generate_data.warranty_days,
+                warranty_uses=generate_data.warranty_uses,
                 pool_type="normal"
             )
 
@@ -1505,10 +1521,10 @@ async def export_codes(
         worksheet.set_column('D:D', 18)  # 过期时间
         worksheet.set_column('E:E', 30)  # 使用者邮箱
         worksheet.set_column('F:F', 18)  # 使用时间
-        worksheet.set_column('G:G', 12)  # 质保时长
+        worksheet.set_column('G:G', 18)  # 质保规则
 
         # 写入表头
-        headers = ['兑换码', '状态', '创建时间', '过期时间', '使用者邮箱', '使用时间', '质保时长(天)']
+        headers = ['兑换码', '状态', '创建时间', '过期时间', '使用者邮箱', '使用时间', '质保规则']
         for col, header in enumerate(headers):
             worksheet.write(0, col, header, header_format)
 
@@ -1527,7 +1543,13 @@ async def export_codes(
             worksheet.write(row, 3, code.get('expires_at', '永久有效'), cell_format)
             worksheet.write(row, 4, code.get('used_by_email', '-'), cell_format)
             worksheet.write(row, 5, code.get('used_at', '-'), cell_format)
-            worksheet.write(row, 6, code.get('warranty_days', '-') if code.get('has_warranty') else '-', cell_format)
+            warranty_rule = '-'
+            if code.get('has_warranty'):
+                if code.get('warranty_type') == WARRANTY_TYPE_USES:
+                    warranty_rule = f"{code.get('warranty_uses', 1)} 次"
+                else:
+                    warranty_rule = f"{code.get('warranty_days', 30)} 天"
+            worksheet.write(row, 6, warranty_rule, cell_format)
 
         # 关闭workbook
         workbook.close()
@@ -1569,7 +1591,9 @@ async def update_code(
             code=code,
             db_session=db,
             has_warranty=update_data.has_warranty,
-            warranty_days=update_data.warranty_days
+            warranty_type=update_data.warranty_type,
+            warranty_days=update_data.warranty_days,
+            warranty_uses=update_data.warranty_uses,
         )
         if not result["success"]:
             return JSONResponse(
@@ -1595,7 +1619,9 @@ async def bulk_update_codes(
             codes=update_data.codes,
             db_session=db,
             has_warranty=update_data.has_warranty,
-            warranty_days=update_data.warranty_days
+            warranty_type=update_data.warranty_type,
+            warranty_days=update_data.warranty_days,
+            warranty_uses=update_data.warranty_uses,
         )
         if not result["success"]:
             return JSONResponse(

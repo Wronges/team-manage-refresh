@@ -7,11 +7,17 @@ import secrets
 import string
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from sqlalchemy import select, update, delete, and_, or_, func
+from sqlalchemy import select, update, delete, and_, or_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import RedemptionCode, RedemptionRecord, Team
+from app.models import (
+    RedemptionCode,
+    RedemptionRecord,
+    Team,
+    WARRANTY_TYPE_DAYS,
+    WARRANTY_TYPE_USES,
+)
 from app.services.settings import (
     settings_service,
     WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM,
@@ -27,6 +33,73 @@ class RedemptionService:
     def __init__(self):
         """初始化兑换码管理服务"""
         pass
+
+    @staticmethod
+    def normalize_warranty_type(value: Optional[str]) -> str:
+        normalized = str(value or WARRANTY_TYPE_DAYS).strip().lower()
+        if normalized not in {WARRANTY_TYPE_DAYS, WARRANTY_TYPE_USES}:
+            return WARRANTY_TYPE_DAYS
+        return normalized
+
+    @staticmethod
+    def normalize_warranty_days(value: Optional[int]) -> int:
+        try:
+            days = int(value or 30)
+        except (TypeError, ValueError):
+            days = 30
+        return max(1, min(days, 3650))
+
+    @staticmethod
+    def normalize_warranty_uses(value: Optional[int]) -> int:
+        try:
+            uses = int(value or 1)
+        except (TypeError, ValueError):
+            uses = 1
+        return max(1, min(uses, 100))
+
+    async def get_warranty_reuse_count(
+        self,
+        db_session: AsyncSession,
+        code: str
+    ) -> int:
+        result = await db_session.execute(
+            select(
+                func.count(RedemptionRecord.id),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (RedemptionRecord.is_warranty_redemption.is_(True), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+            ).where(RedemptionRecord.code == code)
+        )
+        total_redemptions, explicit_warranty_reuses = result.one()
+        total_redemptions = int(total_redemptions or 0)
+        explicit_warranty_reuses = int(explicit_warranty_reuses or 0)
+
+        if explicit_warranty_reuses > 0:
+            return explicit_warranty_reuses
+
+        return max(total_redemptions - 1, 0)
+
+    async def get_remaining_warranty_uses(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode
+    ) -> Optional[int]:
+        if not redemption_code.has_warranty:
+            return None
+
+        warranty_type = self.normalize_warranty_type(redemption_code.warranty_type)
+        if warranty_type != WARRANTY_TYPE_USES:
+            return None
+
+        used_reuses = await self.get_warranty_reuse_count(db_session, redemption_code.code)
+        total_uses = self.normalize_warranty_uses(redemption_code.warranty_uses)
+        return max(total_uses - used_reuses, 0)
 
     def _generate_random_code(self, length: int = 16) -> str:
         """
@@ -72,8 +145,10 @@ class RedemptionService:
         original_status = redemption_code.status
 
         if redemption_code.used_at:
+            warranty_type = str(redemption_code.warranty_type or WARRANTY_TYPE_DAYS).strip().lower()
             if (
                 redemption_code.has_warranty
+                and warranty_type == WARRANTY_TYPE_DAYS
                 and redemption_code.warranty_expires_at
                 and redemption_code.warranty_expires_at < now
             ):
@@ -118,7 +193,17 @@ class RedemptionService:
     ) -> bool:
         """判断是否允许清理失效兑换码的历史记录并彻底删除。"""
         self._sync_code_status_fields(redemption_code)
-        if redemption_code.status != "expired":
+        usage_based_warranty_exhausted = await self._is_usage_based_warranty_exhausted(
+            db_session,
+            redemption_code
+        )
+        is_usage_based_cleanup = (
+            redemption_code.has_warranty
+            and self.normalize_warranty_type(redemption_code.warranty_type) == WARRANTY_TYPE_USES
+            and usage_based_warranty_exhausted
+        )
+
+        if redemption_code.status != "expired" and not is_usage_based_cleanup:
             if redemption_code.has_warranty or redemption_code.expires_at or not redemption_code.used_at:
                 return False
         if not redemption_code.has_warranty and not redemption_code.expires_at and not redemption_code.used_at:
@@ -146,13 +231,32 @@ class RedemptionService:
 
         return True
 
-    @staticmethod
-    def _get_cleanup_reference_time(redemption_code: RedemptionCode) -> Optional[datetime]:
+    async def _is_usage_based_warranty_exhausted(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode
+    ) -> bool:
+        if not redemption_code.has_warranty:
+            return False
+
+        if self.normalize_warranty_type(redemption_code.warranty_type) != WARRANTY_TYPE_USES:
+            return False
+
+        remaining_uses = await self.get_remaining_warranty_uses(db_session, redemption_code)
+        return remaining_uses is not None and remaining_uses <= 0
+
+    async def _get_cleanup_reference_time(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode
+    ) -> Optional[datetime]:
         """获取用于判断历史脏数据冷却期的参考时间。"""
         if redemption_code.warranty_expires_at:
             return redemption_code.warranty_expires_at
         if redemption_code.expires_at:
             return redemption_code.expires_at
+        if await self._is_usage_based_warranty_exhausted(db_session, redemption_code):
+            return redemption_code.used_at
         if redemption_code.used_at and not redemption_code.has_warranty:
             # 长期有效但无质保的兑换码，一旦被使用且关联 Team 不可用，就应按“使用时间”进入无效清理冷却期。
             return redemption_code.used_at
@@ -178,6 +282,10 @@ class RedemptionService:
             candidates: List[Dict[str, Any]] = []
 
             for code in codes:
+                usage_based_warranty_exhausted = await self._is_usage_based_warranty_exhausted(
+                    db_session,
+                    code
+                )
                 record_count_result = await db_session.execute(
                     select(func.count(RedemptionRecord.id)).where(RedemptionRecord.code == code.code)
                 )
@@ -190,14 +298,21 @@ class RedemptionService:
                 if record_count <= 0 and not is_deleted_team_orphan:
                     continue
 
-                cleanup_reference_time = self._get_cleanup_reference_time(code)
+                cleanup_reference_time = await self._get_cleanup_reference_time(db_session, code)
                 if not cleanup_reference_time or cleanup_reference_time > cooldown_threshold:
                     continue
 
-                if code.has_warranty or code.expires_at:
+                if code.has_warranty:
+                    warranty_type = self.normalize_warranty_type(code.warranty_type)
+                    if warranty_type == WARRANTY_TYPE_USES:
+                        if not usage_based_warranty_exhausted:
+                            continue
+                    elif code.status != "expired":
+                        continue
+                elif code.expires_at:
                     if code.status != "expired":
                         continue
-                elif not code.used_at or code.has_warranty:
+                elif not code.used_at:
                     continue
 
                 if record_count > 0 and not await self._can_cleanup_expired_code_records(code, db_session):
@@ -233,7 +348,7 @@ class RedemptionService:
                     "record_count": record_count,
                     "expired_at": cleanup_reference_time.isoformat() if cleanup_reference_time else None,
                     "team_statuses": team_status_summary,
-                    "reason": "无效兑换码"
+                    "reason": "质保次数已用完" if usage_based_warranty_exhausted else "无效兑换码"
                 })
 
             return {
@@ -321,14 +436,18 @@ class RedemptionService:
             shadow_code.reusable_by_seat = True
             shadow_code.status = shadow_code.status or "expired"
             shadow_code.has_warranty = False
+            shadow_code.warranty_type = WARRANTY_TYPE_DAYS
             shadow_code.warranty_days = 0
+            shadow_code.warranty_uses = 0
             return shadow_code
 
         shadow_code = RedemptionCode(
             code=normalized_code,
             status="expired",
             has_warranty=False,
+            warranty_type=WARRANTY_TYPE_DAYS,
             warranty_days=0,
+            warranty_uses=0,
             pool_type="welfare",
             reusable_by_seat=True,
         )
@@ -394,16 +513,21 @@ class RedemptionService:
         redemption_code.used_team_id = latest_record.team_id
 
         if redemption_code.has_warranty:
-            expiration_mode = await settings_service.get_warranty_expiration_mode(db_session)
-            base_record = (
-                latest_record
-                if expiration_mode == WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM
-                else first_record
-            )
-            base_time = base_record.redeemed_at or get_now()
-            redemption_code.used_at = base_time
-            days = redemption_code.warranty_days or 30
-            redemption_code.warranty_expires_at = base_time + timedelta(days=days)
+            warranty_type = self.normalize_warranty_type(redemption_code.warranty_type)
+            if warranty_type == WARRANTY_TYPE_DAYS:
+                expiration_mode = await settings_service.get_warranty_expiration_mode(db_session)
+                base_record = (
+                    latest_record
+                    if expiration_mode == WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM
+                    else first_record
+                )
+                base_time = base_record.redeemed_at or get_now()
+                redemption_code.used_at = base_time
+                days = self.normalize_warranty_days(redemption_code.warranty_days)
+                redemption_code.warranty_expires_at = base_time + timedelta(days=days)
+            else:
+                redemption_code.used_at = latest_record.redeemed_at or get_now()
+                redemption_code.warranty_expires_at = None
         else:
             redemption_code.used_at = latest_record.redeemed_at or get_now()
             redemption_code.warranty_expires_at = None
@@ -416,7 +540,9 @@ class RedemptionService:
         code: Optional[str] = None,
         expires_days: Optional[int] = None,
         has_warranty: bool = False,
+        warranty_type: str = WARRANTY_TYPE_DAYS,
         warranty_days: int = 30,
+        warranty_uses: int = 1,
         pool_type: str = "normal",
         reusable_by_seat: bool = False
     ) -> Dict[str, Any]:
@@ -473,13 +599,19 @@ class RedemptionService:
             if expires_days:
                 expires_at = get_now() + timedelta(days=expires_days)
 
+            normalized_warranty_type = self.normalize_warranty_type(warranty_type)
+            normalized_warranty_days = self.normalize_warranty_days(warranty_days)
+            normalized_warranty_uses = self.normalize_warranty_uses(warranty_uses)
+
             # 3. 创建兑换码记录
             redemption_code = RedemptionCode(
                 code=code,
                 status="unused",
                 expires_at=expires_at,
                 has_warranty=has_warranty,
-                warranty_days=warranty_days,
+                warranty_type=normalized_warranty_type,
+                warranty_days=normalized_warranty_days,
+                warranty_uses=normalized_warranty_uses,
                 pool_type=pool_type,
                 reusable_by_seat=reusable_by_seat
             )
@@ -512,7 +644,9 @@ class RedemptionService:
         count: int,
         expires_days: Optional[int] = None,
         has_warranty: bool = False,
+        warranty_type: str = WARRANTY_TYPE_DAYS,
         warranty_days: int = 30,
+        warranty_uses: int = 1,
         pool_type: str = "normal",
         reusable_by_seat: bool = False
     ) -> Dict[str, Any]:
@@ -543,6 +677,10 @@ class RedemptionService:
             if expires_days:
                 expires_at = get_now() + timedelta(days=expires_days)
 
+            normalized_warranty_type = self.normalize_warranty_type(warranty_type)
+            normalized_warranty_days = self.normalize_warranty_days(warranty_days)
+            normalized_warranty_uses = self.normalize_warranty_uses(warranty_uses)
+
             # 批量生成兑换码
             codes = []
             for i in range(count):
@@ -571,7 +709,9 @@ class RedemptionService:
                     status="unused",
                     expires_at=expires_at,
                     has_warranty=has_warranty,
-                    warranty_days=warranty_days,
+                    warranty_type=normalized_warranty_type,
+                    warranty_days=normalized_warranty_days,
+                    warranty_uses=normalized_warranty_uses,
                     pool_type=pool_type,
                     reusable_by_seat=reusable_by_seat
                 )
@@ -644,7 +784,9 @@ class RedemptionService:
                         "expires_at": None,
                         "created_at": None,
                         "has_warranty": False,
+                        "warranty_type": WARRANTY_TYPE_DAYS,
                         "warranty_days": 0,
+                        "warranty_uses": 0,
                         "pool_type": "welfare",
                         "reusable_by_seat": True,
                         "virtual_welfare_code": True,
@@ -686,7 +828,9 @@ class RedemptionService:
                             "expires_at": None,
                             "created_at": None,
                             "has_warranty": False,
+                            "warranty_type": WARRANTY_TYPE_DAYS,
                             "warranty_days": 0,
+                            "warranty_uses": 0,
                             "pool_type": "welfare",
                             "reusable_by_seat": True,
                             "virtual_welfare_code": True,
@@ -761,6 +905,21 @@ class RedemptionService:
             if status_changed:
                 await db_session.flush()
 
+            if (
+                redemption_code.has_warranty
+                and self.normalize_warranty_type(redemption_code.warranty_type) == WARRANTY_TYPE_USES
+                and redemption_code.used_at
+            ):
+                remaining_warranty_uses = await self.get_remaining_warranty_uses(db_session, redemption_code)
+                if remaining_warranty_uses is not None and remaining_warranty_uses <= 0:
+                    return {
+                        "success": True,
+                        "valid": False,
+                        "reason": "质保次数已用完",
+                        "redemption_code": None,
+                        "error": None
+                    }
+
             # 4. 检查质保是否已过期（针对已使用的质保码）
             if redemption_code.status == "expired" and redemption_code.used_at:
                 redemption_code.status = "expired"
@@ -794,7 +953,9 @@ class RedemptionService:
                     "expires_at": redemption_code.expires_at.isoformat() if redemption_code.expires_at else None,
                     "created_at": redemption_code.created_at.isoformat() if redemption_code.created_at else None,
                     "has_warranty": redemption_code.has_warranty,
+                    "warranty_type": self.normalize_warranty_type(redemption_code.warranty_type),
                     "warranty_days": redemption_code.warranty_days,
+                    "warranty_uses": redemption_code.warranty_uses,
                     "pool_type": redemption_code.pool_type or "normal",
                     "reusable_by_seat": bool(redemption_code.reusable_by_seat)
                 },
@@ -981,7 +1142,9 @@ class RedemptionService:
                     "used_team_id": code.used_team_id,
                     "used_at": code.used_at.isoformat() if code.used_at else None,
                     "has_warranty": code.has_warranty,
+                    "warranty_type": self.normalize_warranty_type(code.warranty_type),
                     "warranty_days": code.warranty_days,
+                    "warranty_uses": code.warranty_uses,
                     "warranty_expires_at": code.warranty_expires_at.isoformat() if code.warranty_expires_at else None,
                     "can_delete": record_counts.get(code.code, 0) == 0
                 })
@@ -1258,10 +1421,19 @@ class RedemptionService:
         code: str,
         db_session: AsyncSession,
         has_warranty: Optional[bool] = None,
-        warranty_days: Optional[int] = None
+        warranty_type: Optional[str] = None,
+        warranty_days: Optional[int] = None,
+        warranty_uses: Optional[int] = None
     ) -> Dict[str, Any]:
         """更新兑换码信息"""
-        return await self.bulk_update_codes([code], db_session, has_warranty, warranty_days)
+        return await self.bulk_update_codes(
+            [code],
+            db_session,
+            has_warranty=has_warranty,
+            warranty_type=warranty_type,
+            warranty_days=warranty_days,
+            warranty_uses=warranty_uses,
+        )
 
     async def withdraw_record(
         self,
@@ -1343,7 +1515,9 @@ class RedemptionService:
         codes: List[str],
         db_session: AsyncSession,
         has_warranty: Optional[bool] = None,
-        warranty_days: Optional[int] = None
+        warranty_type: Optional[str] = None,
+        warranty_days: Optional[int] = None,
+        warranty_uses: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         批量更新兑换码信息
@@ -1365,8 +1539,19 @@ class RedemptionService:
             values = {}
             if has_warranty is not None:
                 values[RedemptionCode.has_warranty] = has_warranty
+            if warranty_type is not None:
+                normalized_warranty_type = self.normalize_warranty_type(warranty_type)
+                values[RedemptionCode.warranty_type] = normalized_warranty_type
+                if normalized_warranty_type != WARRANTY_TYPE_DAYS:
+                    values[RedemptionCode.warranty_expires_at] = None
             if warranty_days is not None:
-                values[RedemptionCode.warranty_days] = warranty_days
+                values[RedemptionCode.warranty_days] = self.normalize_warranty_days(warranty_days)
+            if warranty_uses is not None:
+                values[RedemptionCode.warranty_uses] = self.normalize_warranty_uses(warranty_uses)
+
+            if has_warranty is False:
+                values[RedemptionCode.warranty_type] = WARRANTY_TYPE_DAYS
+                values[RedemptionCode.warranty_expires_at] = None
 
             if not values:
                 return {"success": True, "message": "没有提供更新内容"}

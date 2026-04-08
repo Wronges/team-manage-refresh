@@ -28,6 +28,10 @@ class WarrantyCheckRecord(BaseModel):
     code: str
     has_warranty: bool
     warranty_valid: bool
+    warranty_type: Optional[str] = None
+    warranty_days: Optional[int] = None
+    warranty_uses: Optional[int] = None
+    warranty_uses_remaining: Optional[int] = None
     warranty_expires_at: Optional[str]
     status: str
     used_at: Optional[str]
@@ -44,6 +48,10 @@ class WarrantyCheckResponse(BaseModel):
     success: bool
     has_warranty: bool
     warranty_valid: bool
+    warranty_type: Optional[str] = None
+    warranty_days: Optional[int] = None
+    warranty_uses: Optional[int] = None
+    warranty_uses_remaining: Optional[int] = None
     warranty_expires_at: Optional[str]
     banned_teams: list
     can_reuse: bool
@@ -94,6 +102,10 @@ async def check_warranty(
             success=True,
             has_warranty=result.get("has_warranty", False),
             warranty_valid=result.get("warranty_valid", False),
+            warranty_type=result.get("warranty_type"),
+            warranty_days=result.get("warranty_days"),
+            warranty_uses=result.get("warranty_uses"),
+            warranty_uses_remaining=result.get("warranty_uses_remaining"),
             warranty_expires_at=result.get("warranty_expires_at"),
             banned_teams=result.get("banned_teams", []),
             can_reuse=result.get("can_reuse", False),

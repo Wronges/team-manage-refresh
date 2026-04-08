@@ -25,7 +25,7 @@
             <header class="hero-header">
                 <div class="logo-badge">ChatGPT Team · 官方授权</div>
                 <h1>GPT Team 兑换中心</h1>
-                <p class="hero-subtitle">使用兑换码自助上车，或在质保期内查询重兑资格</p>
+                <p class="hero-subtitle">使用兑换码自助上车，或查询按天数 / 按次数质保的重兑资格</p>
                 {% if remaining_spots is not none %}
                 <div class="spots-badge">
                     <i data-lucide="users" style="width: 14px; height: 14px;"></i>
@@ -102,12 +102,12 @@
                     <section id="warrantyPanel" class="tab-panel">
                         <div class="panel-head">
                             <h2>质保查询</h2>
-                            <p>若您加入的 Team 失效，可在质保期内查询并自助处理。</p>
+                            <p>若您加入的 Team 失效，可查询当前质保状态并自助处理。</p>
                         </div>
 
                         <div class="info-box">
                             <i data-lucide="clipboard-check" class="info-icon"></i>
-                            <p>质保期为 <strong>{{ default_warranty_days|default(30, true) }} 天</strong>，在有效期内可用原兑换码重新加入 Team。</p>
+                            <p>支持按天数或按次数质保，具体规则以您的兑换码配置为准。</p>
                         </div>
 
                         <div class="warranty-query-row">

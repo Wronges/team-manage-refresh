@@ -10,11 +10,18 @@ from sqlalchemy import select, and_, or_, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import RedemptionCode, RedemptionRecord, Team
+from app.models import (
+    RedemptionCode,
+    RedemptionRecord,
+    Team,
+    WARRANTY_TYPE_DAYS,
+    WARRANTY_TYPE_USES,
+)
 from app.services.settings import (
     settings_service,
     WARRANTY_EXPIRATION_MODE_REFRESH_ON_REDEEM,
 )
+from app.services.redemption import RedemptionService
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -24,6 +31,16 @@ logger = logging.getLogger(__name__)
 _query_rate_limit = {}
 
 
+def _count_usage_based_warranty_reuses(records: List[RedemptionRecord]) -> int:
+    explicit_warranty_reuses = sum(
+        1 for record in records if getattr(record, "is_warranty_redemption", False)
+    )
+    if explicit_warranty_reuses > 0:
+        return explicit_warranty_reuses
+
+    return max(len(records) - 1, 0)
+
+
 class WarrantyService:
     """质保服务类"""
 
@@ -31,6 +48,33 @@ class WarrantyService:
         """初始化质保服务"""
         from app.services.team import TeamService
         self.team_service = TeamService()
+        self.redemption_service = RedemptionService()
+
+    def _normalize_warranty_type(self, redemption_code: RedemptionCode) -> str:
+        return self.redemption_service.normalize_warranty_type(redemption_code.warranty_type)
+
+    async def _get_remaining_warranty_uses(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode
+    ) -> Optional[int]:
+        return await self.redemption_service.get_remaining_warranty_uses(db_session, redemption_code)
+
+    async def _build_warranty_summary(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode,
+        expiry_date: Optional[datetime]
+    ) -> Dict[str, Any]:
+        warranty_type = self._normalize_warranty_type(redemption_code)
+        warranty_uses_remaining = await self._get_remaining_warranty_uses(db_session, redemption_code)
+        return {
+            "warranty_type": warranty_type,
+            "warranty_days": redemption_code.warranty_days,
+            "warranty_uses": redemption_code.warranty_uses,
+            "warranty_uses_remaining": warranty_uses_remaining,
+            "warranty_expires_at": expiry_date.isoformat() if expiry_date else None,
+        }
 
     async def _get_warranty_start_time(
         self,
@@ -64,6 +108,9 @@ class WarrantyService:
         if not redemption_code.has_warranty:
             return None
 
+        if self._normalize_warranty_type(redemption_code) != WARRANTY_TYPE_DAYS:
+            return None
+
         if redemption_code.warranty_expires_at:
             return redemption_code.warranty_expires_at
 
@@ -76,12 +123,23 @@ class WarrantyService:
         if not start_time:
             return None
 
-        days = redemption_code.warranty_days or 30
+        days = self.redemption_service.normalize_warranty_days(redemption_code.warranty_days)
         return start_time + timedelta(days=days)
 
-    @staticmethod
-    def _is_warranty_valid(redemption_code: RedemptionCode, expiry_date: Optional[datetime]) -> bool:
+    async def _is_warranty_valid(
+        self,
+        db_session: AsyncSession,
+        redemption_code: RedemptionCode,
+        expiry_date: Optional[datetime]
+    ) -> bool:
         """根据截止时间和码状态判断质保是否有效。"""
+        warranty_type = self._normalize_warranty_type(redemption_code)
+
+        if warranty_type == WARRANTY_TYPE_USES:
+            remaining_uses = await self._get_remaining_warranty_uses(db_session, redemption_code)
+            if remaining_uses is not None:
+                return remaining_uses > 0
+
         if expiry_date:
             return expiry_date >= get_now()
 
@@ -156,6 +214,10 @@ class WarrantyService:
                             "has_warranty": False,
                             "warranty_valid": False,
                             "warranty_expires_at": None,
+                            "warranty_type": None,
+                            "warranty_days": None,
+                            "warranty_uses": None,
+                            "warranty_uses_remaining": None,
                             "banned_teams": [],
                             "can_reuse": False,
                             "original_code": None,
@@ -168,14 +230,19 @@ class WarrantyService:
                         redemption_code_obj,
                         expiration_mode=warranty_expiration_mode
                     )
-                    is_valid = self._is_warranty_valid(redemption_code_obj, expiry_date)
+                    is_valid = await self._is_warranty_valid(db_session, redemption_code_obj, expiry_date)
+                    warranty_summary = await self._build_warranty_summary(db_session, redemption_code_obj, expiry_date)
 
                     # 只有码没有记录的情况
                     return {
                         "success": True,
                         "has_warranty": redemption_code_obj.has_warranty,
                         "warranty_valid": is_valid,
-                        "warranty_expires_at": expiry_date.isoformat() if expiry_date else None,
+                        "warranty_expires_at": warranty_summary["warranty_expires_at"],
+                        "warranty_type": warranty_summary["warranty_type"],
+                        "warranty_days": warranty_summary["warranty_days"],
+                        "warranty_uses": warranty_summary["warranty_uses"],
+                        "warranty_uses_remaining": warranty_summary["warranty_uses_remaining"],
                         "banned_teams": [],
                         "can_reuse": False,
                         "original_code": redemption_code_obj.code,
@@ -183,13 +250,17 @@ class WarrantyService:
                             "code": redemption_code_obj.code,
                             "has_warranty": redemption_code_obj.has_warranty,
                             "warranty_valid": is_valid,
+                            "warranty_type": warranty_summary["warranty_type"],
+                            "warranty_days": warranty_summary["warranty_days"],
+                            "warranty_uses": warranty_summary["warranty_uses"],
+                            "warranty_uses_remaining": warranty_summary["warranty_uses_remaining"],
                             "status": redemption_code_obj.status,
                             "used_at": None,
                             "team_id": None,
                             "team_name": None,
                             "team_status": None,
                             "team_expires_at": None,
-                            "warranty_expires_at": expiry_date.isoformat() if expiry_date else None
+                            "warranty_expires_at": warranty_summary["warranty_expires_at"]
                         }],
                         "message": "兑换码尚未被使用"
                     }
@@ -223,6 +294,10 @@ class WarrantyService:
                     "has_warranty": False,
                     "warranty_valid": False,
                     "warranty_expires_at": None,
+                    "warranty_type": None,
+                    "warranty_days": None,
+                    "warranty_uses": None,
+                    "warranty_uses_remaining": None,
                     "banned_teams": [],
                     "can_reuse": False,
                     "original_code": None,
@@ -237,6 +312,10 @@ class WarrantyService:
             primary_warranty_valid = False
             primary_expiry = None
             primary_code = None
+            primary_warranty_type = None
+            primary_warranty_days = None
+            primary_warranty_uses = None
+            primary_warranty_uses_remaining = None
             can_reuse = False
             suspected_inconsistent_count = 0
 
@@ -255,13 +334,18 @@ class WarrantyService:
                             reference_record=record,
                             expiration_mode=warranty_expiration_mode
                         )
-                        is_valid = self._is_warranty_valid(code_obj, expiry_date)
+                        is_valid = await self._is_warranty_valid(db_session, code_obj, expiry_date)
+                        warranty_summary = await self._build_warranty_summary(db_session, code_obj, expiry_date)
                         if code_obj.has_warranty:
                             has_any_warranty = True
                             if primary_code is None:
                                 primary_warranty_valid = is_valid
                                 primary_expiry = expiry_date
                                 primary_code = code_obj.code
+                                primary_warranty_type = warranty_summary["warranty_type"]
+                                primary_warranty_days = warranty_summary["warranty_days"]
+                                primary_warranty_uses = warranty_summary["warranty_uses"]
+                                primary_warranty_uses_remaining = warranty_summary["warranty_uses_remaining"]
                         logger.warning(
                             f"质保查询发现疑似孤儿记录 (Email: {record.email}, Team: {team.id})，"
                             "为避免误删售后证据，本次仅标记异常，不执行自动清理。"
@@ -271,7 +355,11 @@ class WarrantyService:
                             "code": code_obj.code,
                             "has_warranty": code_obj.has_warranty,
                             "warranty_valid": is_valid,
-                            "warranty_expires_at": expiry_date.isoformat() if expiry_date else None,
+                            "warranty_type": warranty_summary["warranty_type"],
+                            "warranty_days": warranty_summary["warranty_days"],
+                            "warranty_uses": warranty_summary["warranty_uses"],
+                            "warranty_uses_remaining": warranty_summary["warranty_uses_remaining"],
+                            "warranty_expires_at": warranty_summary["warranty_expires_at"],
                             "status": code_obj.status,
                             "used_at": record.redeemed_at.isoformat() if record.redeemed_at else None,
                             "team_id": team.id,
@@ -290,7 +378,8 @@ class WarrantyService:
                     reference_record=record,
                     expiration_mode=warranty_expiration_mode
                 )
-                is_valid = self._is_warranty_valid(code_obj, expiry_date)
+                is_valid = await self._is_warranty_valid(db_session, code_obj, expiry_date)
+                warranty_summary = await self._build_warranty_summary(db_session, code_obj, expiry_date)
 
                 if code_obj.has_warranty:
                     has_any_warranty = True
@@ -299,6 +388,10 @@ class WarrantyService:
                         primary_warranty_valid = is_valid
                         primary_expiry = expiry_date
                         primary_code = code_obj.code
+                        primary_warranty_type = warranty_summary["warranty_type"]
+                        primary_warranty_days = warranty_summary["warranty_days"]
+                        primary_warranty_uses = warranty_summary["warranty_uses"]
+                        primary_warranty_uses_remaining = warranty_summary["warranty_uses_remaining"]
 
                 # 记录封号 Team
                 if team.status == "banned":
@@ -313,7 +406,11 @@ class WarrantyService:
                     "code": code_obj.code,
                     "has_warranty": code_obj.has_warranty,
                     "warranty_valid": is_valid,
-                    "warranty_expires_at": expiry_date.isoformat() if expiry_date else None,
+                    "warranty_type": warranty_summary["warranty_type"],
+                    "warranty_days": warranty_summary["warranty_days"],
+                    "warranty_uses": warranty_summary["warranty_uses"],
+                    "warranty_uses_remaining": warranty_summary["warranty_uses_remaining"],
+                    "warranty_expires_at": warranty_summary["warranty_expires_at"],
                     "status": code_obj.status,
                     "used_at": record.redeemed_at.isoformat() if record.redeemed_at else None,
                     "team_id": team.id,
@@ -324,18 +421,35 @@ class WarrantyService:
                     "device_code_auth_enabled": team.device_code_auth_enabled
                 })
 
-            # 3. 判断是否可以重复使用 (只要有有效的质保码且有被封的 Team)
-            if has_any_warranty and primary_warranty_valid and len(banned_teams_info) > 0:
-                # 进一步验证 (使用现有的 validate_warranty_reuse 逻辑)
-                # 这里为了简单直接复用逻辑判断
-                can_reuse = True
+            validation_email = email
+            if not validation_email:
+                primary_record = next(
+                    (
+                        item for item in final_records
+                        if item.get("code") == primary_code and item.get("email")
+                    ),
+                    None
+                )
+                if primary_record:
+                    validation_email = primary_record["email"]
+                elif records_data:
+                    validation_email = records_data[0][0].email
+
+            if has_any_warranty and primary_code and validation_email:
+                reuse_result = await self.validate_warranty_reuse(
+                    db_session,
+                    primary_code,
+                    validation_email,
+                    apply_self_heal=False,
+                )
+                if reuse_result.get("success"):
+                    can_reuse = bool(reuse_result.get("can_reuse"))
 
             # 4. 最终状态判定
             message = "查询成功"
             if has_any_warranty and not final_records and records_data:
                 # 这种情况说明刚才所有记录都被自愈逻辑删除了（全是虚假成功）
                 message = "系统发现您的兑换记录存在同步异常，已为您自动修复！您的兑换码已恢复，请返回兑换页面重新提交一次即可。"
-                can_reuse = True
             elif suspected_inconsistent_count > 0:
                 message = "检测到部分兑换记录与远端成员状态不一致；系统已保留原始记录，请联系管理员进一步核查。"
 
@@ -344,6 +458,10 @@ class WarrantyService:
                 "has_warranty": has_any_warranty,
                 "warranty_valid": primary_warranty_valid,
                 "warranty_expires_at": primary_expiry.isoformat() if primary_expiry else None,
+                "warranty_type": primary_warranty_type,
+                "warranty_days": primary_warranty_days,
+                "warranty_uses": primary_warranty_uses,
+                "warranty_uses_remaining": primary_warranty_uses_remaining,
                 "banned_teams": banned_teams_info,
                 "can_reuse": can_reuse,
                 "original_code": primary_code,
@@ -362,7 +480,8 @@ class WarrantyService:
         self,
         db_session: AsyncSession,
         code: str,
-        email: str
+        email: str,
+        apply_self_heal: bool = True,
     ) -> Dict[str, Any]:
         """
         验证质保码是否可重复使用
@@ -415,6 +534,7 @@ class WarrantyService:
             all_records_for_code = result.scalars().all()
             had_matching_history = any(r.email == email for r in all_records_for_code)
             cleaned_orphan_for_email = False
+            orphan_record_ids = set()
             
             for record in all_records_for_code:
                 stmt = select(Team).where(Team.id == record.team_id)
@@ -435,11 +555,13 @@ class WarrantyService:
                             # 删除该孤儿记录
                             if record.email == email:
                                 cleaned_orphan_for_email = True
-                            await db_session.delete(record)
-                            if not db_session.in_transaction():
-                                await db_session.commit()
-                            else:
-                                await db_session.flush()
+                            orphan_record_ids.add(record.id)
+                            if apply_self_heal:
+                                await db_session.delete(record)
+                                if not db_session.in_transaction():
+                                    await db_session.commit()
+                                else:
+                                    await db_session.flush()
                             continue # 继续检查下一个记录或结束循环
 
                         # 如果是同一个邮箱且确实在 Team 中，提示已在有效 Team 中
@@ -460,9 +582,15 @@ class WarrantyService:
                             }
 
             # 5. 刷新记录列表，避免继续使用已删除的孤儿记录快照
-            stmt = select(RedemptionRecord).where(RedemptionRecord.code == code)
-            result = await db_session.execute(stmt)
-            all_records_for_code = result.scalars().all()
+            if apply_self_heal:
+                stmt = select(RedemptionRecord).where(RedemptionRecord.code == code)
+                result = await db_session.execute(stmt)
+                all_records_for_code = result.scalars().all()
+            elif orphan_record_ids:
+                all_records_for_code = [
+                    record for record in all_records_for_code
+                    if record.id not in orphan_record_ids
+                ]
 
             # 6. 查找当前用户使用该兑换码的记录 (用于后续逻辑判断)
             records = [r for r in all_records_for_code if r.email == email]
@@ -509,20 +637,32 @@ class WarrantyService:
                 if team and team.status == "banned":
                     has_banned_team = True
                     break
-            if has_banned_team:
-                return {
-                    "success": True,
-                    "can_reuse": True,
-                    "reason": "之前加入的 Team 已封号，可使用质保重复兑换",
-                    "error": None
-                }
-            else:
+            if not has_banned_team:
                 return {
                     "success": True,
                     "can_reuse": False,
                     "reason": "未找到被封号记录，且质保不支持正常过期或异常提示的重复兑换",
                     "error": None
                 }
+
+            if self._normalize_warranty_type(redemption_code) == WARRANTY_TYPE_USES:
+                total_uses = self.redemption_service.normalize_warranty_uses(redemption_code.warranty_uses)
+                used_reuses = _count_usage_based_warranty_reuses(all_records_for_code)
+                remaining_uses = max(total_uses - used_reuses, 0)
+                if remaining_uses <= 0:
+                    return {
+                        "success": True,
+                        "can_reuse": False,
+                        "reason": "质保次数已用完",
+                        "error": None
+                    }
+
+            return {
+                "success": True,
+                "can_reuse": True,
+                "reason": "之前加入的 Team 已封号，可使用质保重复兑换",
+                "error": None
+            }
 
         except Exception as e:
             logger.error(f"验证质保码重复使用失败: {e}")

@@ -732,6 +732,33 @@ function toggleWarrantyDays(checkbox, targetId) {
     }
 }
 
+function toggleWarrantyTypeFields(prefix, warrantyType) {
+    const daysGroup = document.getElementById(`${prefix}-warranty-days-group`);
+    const usesGroup = document.getElementById(`${prefix}-warranty-uses-group`);
+    if (daysGroup) {
+        daysGroup.style.display = warrantyType === 'uses' ? 'none' : 'block';
+    }
+    if (usesGroup) {
+        usesGroup.style.display = warrantyType === 'uses' ? 'block' : 'none';
+    }
+}
+
+function toggleWarrantyConfig(prefix, enabled) {
+    const typeGroup = document.getElementById(`${prefix}-warranty-type-group`);
+    if (typeGroup) {
+        typeGroup.style.display = enabled ? 'block' : 'none';
+    }
+
+    if (!enabled) {
+        toggleWarrantyTypeFields(prefix, 'days');
+        return;
+    }
+
+    const typeSelect = document.querySelector(`#${prefix}-warranty-type-group select[name="warrantyType"]`);
+    const warrantyType = typeSelect ? typeSelect.value : 'days';
+    toggleWarrantyTypeFields(prefix, warrantyType);
+}
+
 // === Team 导入逻辑 ===
 
 
@@ -1428,12 +1455,16 @@ async function generateSingle(event) {
     const customCode = form.customCode.value.trim();
     const expiresDays = form.expiresDays.value;
     const hasWarranty = form.hasWarranty.checked;
+    const warrantyType = form.warrantyType ? form.warrantyType.value : 'days';
     const warrantyDays = form.warrantyDays ? form.warrantyDays.value : 30;
+    const warrantyUses = form.warrantyUses ? form.warrantyUses.value : 1;
 
     const data = {
         type: 'single',
         has_warranty: hasWarranty,
-        warranty_days: parseInt(warrantyDays || 30)
+        warranty_type: warrantyType,
+        warranty_days: parseInt(warrantyDays || 30),
+        warranty_uses: parseInt(warrantyUses || 1)
     };
     if (customCode) data.code = customCode;
     if (expiresDays) data.expires_days = parseInt(expiresDays);
@@ -1475,7 +1506,9 @@ async function generateBatch(event) {
     const count = parseInt(form.count.value);
     const expiresDays = form.expiresDays.value;
     const hasWarranty = form.hasWarranty.checked;
+    const warrantyType = form.warrantyType ? form.warrantyType.value : 'days';
     const warrantyDays = form.warrantyDays ? form.warrantyDays.value : 30;
+    const warrantyUses = form.warrantyUses ? form.warrantyUses.value : 1;
 
     if (count < 1 || count > 1000) {
         showToast('生成数量必须在1-1000之间', 'error');
@@ -1486,7 +1519,9 @@ async function generateBatch(event) {
         type: 'batch',
         count: count,
         has_warranty: hasWarranty,
-        warranty_days: parseInt(warrantyDays || 30)
+        warranty_type: warrantyType,
+        warranty_days: parseInt(warrantyDays || 30),
+        warranty_uses: parseInt(warrantyUses || 1)
     };
     if (expiresDays) data.expires_days = parseInt(expiresDays);
 

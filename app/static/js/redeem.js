@@ -231,6 +231,9 @@ function getFriendlyRedeemErrorMessage(rawMessage, statusCode = 0) {
     if (includesAny('质保已过期')) {
         return '该兑换码质保已过期，无法再次兑换';
     }
+    if (includesAny('质保次数已用完')) {
+        return '该兑换码的质保次数已用完，无法再次兑换';
+    }
 
     if (includesAny('兑换码已过期', '超过首次兑换截止时间', 'expired')) {
         return '兑换码已过期，请联系管理员更换新码';
@@ -333,6 +336,9 @@ function getFriendlyWarrantyErrorMessage(rawMessage, statusCode = 0) {
 
     if (includesAny('质保已过期')) {
         return '该兑换码质保已过期';
+    }
+    if (includesAny('质保次数已用完')) {
+        return '该兑换码质保次数已用完';
     }
 
     if (includesAny('服务器响应格式错误', 'cannot parse', 'json')) {
@@ -859,9 +865,15 @@ function showWarrantyResult(data) {
         // 1. 顶部状态概览 (如果有质保码)
         let summaryHtml = '';
         if (data.has_warranty) {
-            const warrantyStatus = data.warranty_valid ?
-                '<span class="badge badge-success">✓ 质保有效</span>' :
-                '<span class="badge badge-error">✗ 质保已过期</span>';
+            const warrantyType = data.warranty_type === 'uses' ? 'uses' : 'days';
+            const warrantyRuleText = warrantyType === 'uses'
+                ? `剩余 ${Number(data.warranty_uses_remaining || 0)} / ${Number(data.warranty_uses || 0)} 次`
+                : `${Number(data.warranty_days || 0)} 天`;
+            const warrantyStatus = data.warranty_valid
+                ? '<span class="badge badge-success">✓ 质保有效</span>'
+                : (warrantyType === 'uses'
+                    ? '<span class="badge badge-error">✗ 质保次数已用完</span>'
+                    : '<span class="badge badge-error">✗ 质保已过期</span>');
 
             summaryHtml = `
                 <div class="warranty-summary" style="margin-bottom: 2rem; padding: 1.2rem; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid var(--border-base);">
@@ -870,7 +882,11 @@ function showWarrantyResult(data) {
                             <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">当前质保状态</div>
                             <div style="font-size: 1.1rem; font-weight: 600;">${warrantyStatus}</div>
                         </div>
-                        ${data.warranty_expires_at ? `
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">质保规则</div>
+                            <div style="font-size: 1rem;">${warrantyType === 'uses' ? '按次数质保' : '按天数质保'} / ${warrantyRuleText}</div>
+                        </div>
+                        ${warrantyType === 'days' && data.warranty_expires_at ? `
                         <div style="text-align: right;">
                             <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.4rem;">质保到期时间</div>
                             <div style="font-size: 1rem;">${formatDate(data.warranty_expires_at)}</div>
@@ -887,6 +903,7 @@ function showWarrantyResult(data) {
                 <h4 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--text-primary);">我的兑换记录</h4>
                 <div style="display: flex; flex-direction: column; gap: 1rem;">
                     ${data.records.map(record => {
+            const warrantyType = record.warranty_type === 'uses' ? 'uses' : 'days';
             const typeMarker = record.has_warranty ?
                 '<span class="badge badge-warranty" style="background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">质保码</span>' :
                 '<span class="badge badge-normal" style="background: rgba(255,255,255,0.1); color: var(--text-muted); padding: 2px 6px; border-radius: 4px; font-size: 0.75rem;">常规码</span>';
@@ -911,7 +928,7 @@ function showWarrantyResult(data) {
                                          <div style="font-weight: 500; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                                              <span>${escapeHtml(record.team_name || '未知 Team')}</span>
                                              <span>${teamStatusBadge}</span>
-                                             ${(record.has_warranty && record.warranty_valid && record.team_status === 'banned') ? `
+                                             ${(record.has_warranty && data.can_reuse && record.code === data.original_code && record.team_status === 'banned') ? `
                                              <button onclick='oneClickReplace(${JSON.stringify(String(record.code || ''))}, ${JSON.stringify(String(record.email || currentEmail || ''))}, this)' class="btn btn-xs btn-primary" style="padding: 2px 8px; font-size: 0.75rem; height: auto; min-height: 0;">
                                                  一键换车
                                              </button>
@@ -928,9 +945,11 @@ function showWarrantyResult(data) {
                                      </div>
                                     ${record.has_warranty ? `
                                     <div style="grid-column: span 2;">
-                                        <div style="color: var(--text-muted); margin-bottom: 0.2rem;">质保到期</div>
+                                        <div style="color: var(--text-muted); margin-bottom: 0.2rem;">质保规则</div>
                                         <div style="${record.warranty_valid ? 'color: var(--success);' : 'color: var(--danger);'}">
-                                            ${record.warranty_expires_at ? `${formatDate(record.warranty_expires_at)} ${record.warranty_valid ? '(有效)' : '(已过期)'}` : '尚未开始计算 (首次使用后开启)'}
+                                            ${warrantyType === 'uses'
+                                                ? `按次数质保，总计 ${Number(record.warranty_uses || 0)} 次，剩余 ${Number(record.warranty_uses_remaining || 0)} 次`
+                                                : (record.warranty_expires_at ? `${formatDate(record.warranty_expires_at)} ${record.warranty_valid ? '(有效)' : '(已过期)'}` : '尚未开始计算 (首次使用后开启)')}
                                         </div>
                                     </div>
                                     ` : ''}
@@ -964,6 +983,7 @@ function showWarrantyResult(data) {
                 </div>
                 <p style="margin: 0 0 1.2rem 0; color: var(--text-secondary); font-size: 0.95rem;">
                     监测到您所在的 Team 已失效。由于您的质保码仍在有效期内，您可以立即复制兑换码进行重兑。
+                    ${data.warranty_type === 'uses' ? ' 当前将按剩余质保次数判断是否还能重兑。' : ''}
                 </p>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <input type="text" value="${escapeHtml(data.original_code)}" readonly 

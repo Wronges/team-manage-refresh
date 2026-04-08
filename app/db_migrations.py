@@ -76,6 +76,22 @@ def run_auto_migration():
                 ADD COLUMN warranty_days INTEGER DEFAULT 30
             """)
             migrations_applied.append("redemption_codes.warranty_days")
+
+        if not column_exists(cursor, "redemption_codes", "warranty_type"):
+            logger.info("添加 redemption_codes.warranty_type 字段")
+            cursor.execute("""
+                ALTER TABLE redemption_codes
+                ADD COLUMN warranty_type VARCHAR(20) DEFAULT 'days'
+            """)
+            migrations_applied.append("redemption_codes.warranty_type")
+
+        if not column_exists(cursor, "redemption_codes", "warranty_uses"):
+            logger.info("添加 redemption_codes.warranty_uses 字段")
+            cursor.execute("""
+                ALTER TABLE redemption_codes
+                ADD COLUMN warranty_uses INTEGER DEFAULT 1
+            """)
+            migrations_applied.append("redemption_codes.warranty_uses")
         
         if not column_exists(cursor, "redemption_records", "is_warranty_redemption"):
             logger.info("添加 redemption_records.is_warranty_redemption 字段")

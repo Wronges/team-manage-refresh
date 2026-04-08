@@ -9,6 +9,10 @@ from app.database import Base
 from app.utils.time_utils import get_now
 
 
+WARRANTY_TYPE_DAYS = "days"
+WARRANTY_TYPE_USES = "uses"
+
+
 class Team(Base):
     """Team 信息表"""
     __tablename__ = "teams"
@@ -105,7 +109,9 @@ class RedemptionCode(Base):
     used_team_id = Column(Integer, ForeignKey("teams.id"), comment="使用的 Team ID")
     used_at = Column(DateTime, comment="使用时间")
     has_warranty = Column(Boolean, default=False, comment="是否为质保兑换码")
+    warranty_type = Column(String(20), default=WARRANTY_TYPE_DAYS, comment="质保类型: days/uses")
     warranty_days = Column(Integer, default=30, comment="质保时长(天)")
+    warranty_uses = Column(Integer, default=1, comment="质保可重兑次数")
     warranty_expires_at = Column(DateTime, comment="质保到期时间(首次使用后根据质保时长计算)")
     pool_type = Column(String(20), default="normal", comment="兑换池类型: normal/welfare")
     reusable_by_seat = Column(Boolean, default=False, comment="是否可按席位重复使用")

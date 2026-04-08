@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models import RedemptionCode, RedemptionRecord, Team, TeamEmailMapping
+from app.models import RedemptionCode, RedemptionRecord, Team, TeamEmailMapping, WARRANTY_TYPE_USES
 from app.services.redeem_flow import RedeemFlowService
 from app.services.notification import notification_service
 from app.services.redemption import RedemptionService
@@ -794,3 +794,418 @@ class RedeemFlowServiceTests(unittest.IsolatedAsyncioTestCase):
                     welfare_code="WELF-CONCURRENT-001",
                 )
                 self.assertEqual(usage["remaining_count"], 0)
+
+
+class WarrantyUsesTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.session_factory = async_sessionmaker(
+            self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(__import__("sqlalchemy").text("PRAGMA foreign_keys=ON"))
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def test_usage_based_warranty_allows_one_more_redeem_when_quota_remains(self):
+        async with self.session_factory() as session:
+            team = Team(
+                id=101,
+                email="owner-101@example.com",
+                access_token_encrypted="token-101",
+                account_id="acct-101",
+                team_name="Banned Team",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            code = RedemptionCode(
+                code="USES-WARRANTY-001",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=1,
+                used_at=get_now() - timedelta(days=1),
+                pool_type="normal",
+            )
+            record = RedemptionRecord(
+                email="user@example.com",
+                code="USES-WARRANTY-001",
+                team_id=101,
+                account_id="acct-101",
+                redeemed_at=get_now() - timedelta(days=1),
+            )
+            session.add_all([team, code, record])
+            await session.commit()
+
+            service = WarrantyService()
+            service.team_service = StubTeamService()
+
+            result = await service.validate_warranty_reuse(session, "USES-WARRANTY-001", "user@example.com")
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["can_reuse"])
+
+    async def test_usage_based_warranty_ignores_orphan_record_before_counting_remaining_uses(self):
+        async with self.session_factory() as session:
+            banned_team = Team(
+                id=102,
+                email="owner-102@example.com",
+                access_token_encrypted="token-102",
+                account_id="acct-102",
+                team_name="Banned Team",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            orphan_team = Team(
+                id=103,
+                email="owner-103@example.com",
+                access_token_encrypted="token-103",
+                account_id="acct-103",
+                team_name="Orphan Team",
+                current_members=1,
+                max_members=6,
+                status="active",
+                pool_type="normal",
+            )
+            code = RedemptionCode(
+                code="USES-WARRANTY-ORPHAN-001",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=1,
+                used_at=get_now() - timedelta(days=1),
+                pool_type="normal",
+            )
+            session.add_all([
+                banned_team,
+                orphan_team,
+                code,
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-ORPHAN-001",
+                    team_id=102,
+                    account_id="acct-102",
+                    redeemed_at=get_now() - timedelta(days=2),
+                ),
+                RedemptionRecord(
+                    email="ghost@example.com",
+                    code="USES-WARRANTY-ORPHAN-001",
+                    team_id=103,
+                    account_id="acct-103",
+                    redeemed_at=get_now() - timedelta(days=1),
+                    is_warranty_redemption=True,
+                ),
+            ])
+            await session.commit()
+
+            service = WarrantyService()
+            service.team_service = StubTeamService(
+                sync_results={103: [{"success": True, "member_emails": []}]}
+            )
+
+            result = await service.validate_warranty_reuse(
+                session,
+                "USES-WARRANTY-ORPHAN-001",
+                "user@example.com",
+            )
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["can_reuse"])
+
+            stored_records = (
+                await session.execute(
+                    select(RedemptionRecord).where(RedemptionRecord.code == "USES-WARRANTY-ORPHAN-001")
+                )
+            ).scalars().all()
+            self.assertEqual(len(stored_records), 1)
+            self.assertEqual(stored_records[0].team_id, 102)
+
+    async def test_usage_based_warranty_status_uses_real_reuse_validation(self):
+        async with self.session_factory() as session:
+            banned_team = Team(
+                id=104,
+                email="owner-104@example.com",
+                access_token_encrypted="token-104",
+                account_id="acct-104",
+                team_name="Banned Team",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            active_team = Team(
+                id=105,
+                email="owner-105@example.com",
+                access_token_encrypted="token-105",
+                account_id="acct-105",
+                team_name="Active Team",
+                current_members=1,
+                max_members=6,
+                status="active",
+                pool_type="normal",
+            )
+            code = RedemptionCode(
+                code="USES-WARRANTY-STATUS-001",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=2,
+                used_at=get_now() - timedelta(hours=1),
+                pool_type="normal",
+            )
+            session.add_all([
+                banned_team,
+                active_team,
+                code,
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-STATUS-001",
+                    team_id=104,
+                    account_id="acct-104",
+                    redeemed_at=get_now() - timedelta(days=2),
+                ),
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-STATUS-001",
+                    team_id=105,
+                    account_id="acct-105",
+                    redeemed_at=get_now() - timedelta(hours=1),
+                    is_warranty_redemption=True,
+                ),
+            ])
+            await session.commit()
+
+            service = WarrantyService()
+            service.team_service = StubTeamService(
+                sync_results={105: [{"success": True, "member_emails": ["user@example.com"]}]}
+            )
+
+            status_result = await service.check_warranty_status(
+                session,
+                code="USES-WARRANTY-STATUS-001",
+            )
+
+            self.assertTrue(status_result["success"])
+            self.assertTrue(status_result["warranty_valid"])
+            self.assertFalse(status_result["can_reuse"])
+            self.assertEqual(status_result["warranty_uses_remaining"], 1)
+
+    async def test_usage_based_warranty_blocks_redeem_after_quota_is_exhausted(self):
+        async with self.session_factory() as session:
+            team_1 = Team(
+                id=111,
+                email="owner-111@example.com",
+                access_token_encrypted="token-111",
+                account_id="acct-111",
+                team_name="Banned Team 1",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            team_2 = Team(
+                id=112,
+                email="owner-112@example.com",
+                access_token_encrypted="token-112",
+                account_id="acct-112",
+                team_name="Banned Team 2",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            code = RedemptionCode(
+                code="USES-WARRANTY-002",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=1,
+                used_at=get_now() - timedelta(days=2),
+                pool_type="normal",
+            )
+            records = [
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-002",
+                    team_id=111,
+                    account_id="acct-111",
+                    redeemed_at=get_now() - timedelta(days=2),
+                ),
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-002",
+                    team_id=112,
+                    account_id="acct-112",
+                    redeemed_at=get_now() - timedelta(days=1),
+                    is_warranty_redemption=True,
+                ),
+            ]
+            session.add_all([team_1, team_2, code, *records])
+            await session.commit()
+
+            service = WarrantyService()
+            service.team_service = StubTeamService()
+
+            result = await service.validate_warranty_reuse(session, "USES-WARRANTY-002", "user@example.com")
+            status_result = await service.check_warranty_status(session, code="USES-WARRANTY-002")
+
+            self.assertTrue(result["success"])
+            self.assertFalse(result["can_reuse"])
+            self.assertIn("质保次数已用完", result["reason"])
+            self.assertTrue(status_result["success"])
+            self.assertEqual(status_result["warranty_type"], WARRANTY_TYPE_USES)
+            self.assertEqual(status_result["warranty_uses_remaining"], 0)
+            self.assertFalse(status_result["warranty_valid"])
+            self.assertFalse(status_result["can_reuse"])
+
+    async def test_usage_based_warranty_exhausted_codes_are_invalid_cleanup_candidates(self):
+        async with self.session_factory() as session:
+            team_1 = Team(
+                id=121,
+                email="owner-121@example.com",
+                access_token_encrypted="token-121",
+                account_id="acct-121",
+                team_name="Expired Banned Team 1",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            team_2 = Team(
+                id=122,
+                email="owner-122@example.com",
+                access_token_encrypted="token-122",
+                account_id="acct-122",
+                team_name="Expired Banned Team 2",
+                current_members=0,
+                max_members=6,
+                status="banned",
+                pool_type="normal",
+            )
+            code = RedemptionCode(
+                code="USES-WARRANTY-CLEANUP-001",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=1,
+                used_at=get_now() - timedelta(days=31),
+                pool_type="normal",
+            )
+            session.add_all([
+                team_1,
+                team_2,
+                code,
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-CLEANUP-001",
+                    team_id=121,
+                    account_id="acct-121",
+                    redeemed_at=get_now() - timedelta(days=45),
+                ),
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-CLEANUP-001",
+                    team_id=122,
+                    account_id="acct-122",
+                    redeemed_at=get_now() - timedelta(days=31),
+                    is_warranty_redemption=True,
+                ),
+            ])
+            await session.commit()
+
+            result = await RedemptionService().get_invalid_code_candidates(session)
+
+            self.assertTrue(result["success"])
+            cleanup_entry = next(
+                (item for item in result["codes"] if item["code"] == "USES-WARRANTY-CLEANUP-001"),
+                None,
+            )
+            self.assertIsNotNone(cleanup_entry)
+            self.assertEqual(cleanup_entry["reason"], "质保次数已用完")
+
+    async def test_usage_based_warranty_count_prefers_explicit_warranty_redemption_flag(self):
+        async with self.session_factory() as session:
+            code = RedemptionCode(
+                code="USES-WARRANTY-FLAG-001",
+                status="used",
+                has_warranty=True,
+                warranty_type=WARRANTY_TYPE_USES,
+                warranty_uses=1,
+                used_at=get_now() - timedelta(days=1),
+                pool_type="normal",
+            )
+            session.add(code)
+            session.add_all([
+                Team(
+                    id=131,
+                    email="owner-131@example.com",
+                    access_token_encrypted="token-131",
+                    account_id="acct-131",
+                    team_name="Original Team",
+                    current_members=0,
+                    max_members=6,
+                    status="banned",
+                    pool_type="normal",
+                ),
+                Team(
+                    id=132,
+                    email="owner-132@example.com",
+                    access_token_encrypted="token-132",
+                    account_id="acct-132",
+                    team_name="Warranty Team",
+                    current_members=0,
+                    max_members=6,
+                    status="banned",
+                    pool_type="normal",
+                ),
+            ])
+            session.add_all([
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-FLAG-001",
+                    team_id=131,
+                    account_id="acct-131",
+                    redeemed_at=get_now() - timedelta(days=5),
+                    is_warranty_redemption=False,
+                ),
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="USES-WARRANTY-FLAG-001",
+                    team_id=132,
+                    account_id="acct-132",
+                    redeemed_at=get_now() - timedelta(days=1),
+                    is_warranty_redemption=True,
+                ),
+            ])
+            await session.commit()
+
+            await session.execute(
+                __import__("sqlalchemy").delete(RedemptionRecord).where(
+                    RedemptionRecord.code == "USES-WARRANTY-FLAG-001",
+                    RedemptionRecord.team_id == 131,
+                )
+            )
+            await session.commit()
+
+            service = RedemptionService()
+            refreshed_code = (
+                await session.execute(
+                    select(RedemptionCode).where(RedemptionCode.code == "USES-WARRANTY-FLAG-001")
+                )
+            ).scalar_one()
+
+            remaining_uses = await service.get_remaining_warranty_uses(session, refreshed_code)
+            validate_result = await service.validate_code("USES-WARRANTY-FLAG-001", session)
+
+            self.assertEqual(remaining_uses, 0)
+            self.assertTrue(validate_result["success"])
+            self.assertFalse(validate_result["valid"])
+            self.assertEqual(validate_result["reason"], "质保次数已用完")
