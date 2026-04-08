@@ -910,9 +910,12 @@
 
     function toggleCodeWarrantyForm(prefix, enabled) {
         const typeGroup = document.getElementById(`${prefix}-warranty-type-group`);
+        const daysGroup = document.getElementById(`${prefix}-warranty-days-group`);
+        const usesGroup = document.getElementById(`${prefix}-warranty-uses-group`);
         if (typeGroup) typeGroup.style.display = enabled ? 'block' : 'none';
         if (!enabled) {
-            toggleCodeWarrantyTypeFields(prefix, 'days');
+            if (daysGroup) daysGroup.style.display = 'none';
+            if (usesGroup) usesGroup.style.display = 'none';
             return;
         }
         const typeSelect = document.getElementById(`${prefix}-warranty-type`);

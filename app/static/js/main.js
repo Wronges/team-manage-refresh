@@ -616,6 +616,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    initGenerateCodeWarrantyControls();
     setSingleImportMode('quick');
 });
 
@@ -745,18 +746,73 @@ function toggleWarrantyTypeFields(prefix, warrantyType) {
 
 function toggleWarrantyConfig(prefix, enabled) {
     const typeGroup = document.getElementById(`${prefix}-warranty-type-group`);
+    const daysGroup = document.getElementById(`${prefix}-warranty-days-group`);
+    const usesGroup = document.getElementById(`${prefix}-warranty-uses-group`);
     if (typeGroup) {
         typeGroup.style.display = enabled ? 'block' : 'none';
     }
 
     if (!enabled) {
-        toggleWarrantyTypeFields(prefix, 'days');
+        if (daysGroup) {
+            daysGroup.style.display = 'none';
+        }
+        if (usesGroup) {
+            usesGroup.style.display = 'none';
+        }
         return;
     }
 
     const typeSelect = document.querySelector(`#${prefix}-warranty-type-group select[name="warrantyType"]`);
     const warrantyType = typeSelect ? typeSelect.value : 'days';
     toggleWarrantyTypeFields(prefix, warrantyType);
+}
+
+function bindGenerateCodeWarrantyControls(prefix) {
+    const modal = document.getElementById('generateCodeModal');
+    if (!modal) return;
+
+    const formPanel = modal.querySelector(`#${prefix === 'single' ? 'singleGenerate' : 'batchGenerate'}`);
+    if (!formPanel) return;
+
+    const form = formPanel.querySelector('form');
+    if (!form) return;
+
+    const warrantyCheckbox = form.querySelector('input[name="hasWarranty"]');
+    const warrantyTypeSelect = form.querySelector('select[name="warrantyType"]');
+    if (!warrantyCheckbox || !warrantyTypeSelect) return;
+
+    if (!warrantyCheckbox.dataset.warrantyBound) {
+        warrantyCheckbox.addEventListener('change', () => {
+            toggleWarrantyConfig(prefix, warrantyCheckbox.checked);
+        });
+        warrantyCheckbox.dataset.warrantyBound = 'true';
+    }
+
+    if (!warrantyTypeSelect.dataset.warrantyBound) {
+        warrantyTypeSelect.addEventListener('change', () => {
+            toggleWarrantyTypeFields(prefix, warrantyTypeSelect.value);
+        });
+        warrantyTypeSelect.dataset.warrantyBound = 'true';
+    }
+
+    if (!form.dataset.warrantyResetBound) {
+        form.addEventListener('reset', () => {
+            window.setTimeout(() => {
+                toggleWarrantyConfig(prefix, false);
+                if (warrantyTypeSelect) {
+                    warrantyTypeSelect.value = 'days';
+                }
+            }, 0);
+        });
+        form.dataset.warrantyResetBound = 'true';
+    }
+
+    toggleWarrantyConfig(prefix, warrantyCheckbox.checked);
+}
+
+function initGenerateCodeWarrantyControls() {
+    bindGenerateCodeWarrantyControls('single');
+    bindGenerateCodeWarrantyControls('batch');
 }
 
 // === Team 导入逻辑 ===
