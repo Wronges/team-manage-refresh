@@ -164,6 +164,106 @@ class RedemptionService:
 
         return redemption_code.status != original_status
 
+    def _get_effective_code_status(
+        self,
+        redemption_code: RedemptionCode,
+        now: Optional[datetime] = None
+    ) -> str:
+        """返回兑换码当前应呈现的状态，不修改 ORM 对象。"""
+        current_time = now or get_now()
+
+        if redemption_code.used_at:
+            warranty_type = self.normalize_warranty_type(redemption_code.warranty_type)
+            if (
+                redemption_code.has_warranty
+                and warranty_type == WARRANTY_TYPE_DAYS
+                and redemption_code.warranty_expires_at
+                and redemption_code.warranty_expires_at < current_time
+            ):
+                return "expired"
+            return "used"
+
+        if redemption_code.expires_at:
+            return "expired" if redemption_code.expires_at < current_time else "unused"
+
+        if redemption_code.status in {"unused", "used"}:
+            return redemption_code.status
+
+        return "unused"
+
+    def _sync_code_status_fields(self, redemption_code: RedemptionCode) -> bool:
+        """按当前时间同步兑换码状态。"""
+        effective_status = self._get_effective_code_status(redemption_code)
+        status_changed = redemption_code.status != effective_status
+        if status_changed:
+            redemption_code.status = effective_status
+        return status_changed
+
+    async def _get_code_delete_skip_reason(
+        self,
+        db_session: AsyncSession,
+        code: str,
+        redemption_code: Optional[RedemptionCode] = None,
+        record_count: Optional[int] = None,
+        now: Optional[datetime] = None,
+    ) -> Optional[str]:
+        """返回兑换码无法直接删除的原因；可删除时返回 None。"""
+        current_time = now or get_now()
+        current_code = redemption_code
+
+        if current_code is None:
+            result = await db_session.execute(
+                select(RedemptionCode)
+                .where(RedemptionCode.code == code)
+                .execution_options(populate_existing=True)
+            )
+            current_code = result.scalar_one_or_none()
+
+        if not current_code:
+            return "兑换码不存在"
+
+        effective_status = self._get_effective_code_status(current_code, now=current_time)
+        if (
+            current_code.status != "unused"
+            or effective_status != "unused"
+            or current_code.used_at is not None
+            or current_code.used_by_email is not None
+            or current_code.used_team_id is not None
+        ):
+            return "仅支持批量删除未使用兑换码"
+
+        current_record_count = record_count
+        if current_record_count is None:
+            record_count_result = await db_session.execute(
+                select(func.count(RedemptionRecord.id)).where(RedemptionRecord.code == code)
+            )
+            current_record_count = int(record_count_result.scalar() or 0)
+
+        if current_record_count > 0:
+            return f"已有 {current_record_count} 条关联记录，无法直接删除"
+
+        return None
+
+    async def _delete_unused_code_if_eligible(
+        self,
+        db_session: AsyncSession,
+        code: str,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """按删除时条件重验，仅删除仍然符合条件的未使用兑换码。"""
+        current_time = now or get_now()
+        delete_stmt = delete(RedemptionCode).where(
+            RedemptionCode.code == code,
+            RedemptionCode.status == "unused",
+            RedemptionCode.used_at.is_(None),
+            RedemptionCode.used_by_email.is_(None),
+            RedemptionCode.used_team_id.is_(None),
+            or_(RedemptionCode.expires_at.is_(None), RedemptionCode.expires_at >= current_time),
+            ~select(RedemptionRecord.id).where(RedemptionRecord.code == code).exists(),
+        )
+        result = await db_session.execute(delete_stmt)
+        return bool(result.rowcount and result.rowcount > 0)
+
     async def _sync_pool_code_statuses(
         self,
         db_session: AsyncSession,
@@ -1414,6 +1514,113 @@ class RedemptionService:
                 "success": False,
                 "message": None,
                 "error": "删除兑换码失败，请稍后重试"
+            }
+
+    async def bulk_delete_codes(
+        self,
+        codes: List[str],
+        db_session: AsyncSession
+    ) -> Dict[str, Any]:
+        """批量删除未使用且无关联记录的兑换码。"""
+        try:
+            normalized_codes: List[str] = []
+            seen = set()
+            for raw_code in codes or []:
+                code = str(raw_code or "").strip()
+                if not code or code in seen:
+                    continue
+                seen.add(code)
+                normalized_codes.append(code)
+
+            if not normalized_codes:
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": "请选择需要删除的兑换码",
+                }
+
+            current_time = get_now()
+            code_result = await db_session.execute(
+                select(RedemptionCode).where(RedemptionCode.code.in_(normalized_codes))
+            )
+            code_map = {item.code: item for item in code_result.scalars().all()}
+
+            record_count_result = await db_session.execute(
+                select(RedemptionRecord.code, func.count(RedemptionRecord.id))
+                .where(RedemptionRecord.code.in_(normalized_codes))
+                .group_by(RedemptionRecord.code)
+            )
+            record_counts = {
+                record_code: int(record_total or 0)
+                for record_code, record_total in record_count_result.all()
+            }
+
+            deleted_codes: List[str] = []
+            skipped_codes: List[Dict[str, str]] = []
+
+            for code in normalized_codes:
+                redemption_code = code_map.get(code)
+                skip_reason = await self._get_code_delete_skip_reason(
+                    db_session,
+                    code,
+                    redemption_code=redemption_code,
+                    record_count=record_counts.get(code),
+                    now=current_time,
+                )
+                if skip_reason:
+                    skipped_codes.append({"code": code, "reason": skip_reason})
+                    continue
+
+                deleted = await self._delete_unused_code_if_eligible(
+                    db_session,
+                    code,
+                    now=current_time,
+                )
+                if deleted:
+                    deleted_codes.append(code)
+                    continue
+
+                latest_reason = await self._get_code_delete_skip_reason(
+                    db_session,
+                    code,
+                    now=current_time,
+                )
+                skipped_codes.append({
+                    "code": code,
+                    "reason": latest_reason or "兑换码状态已变化，无法删除",
+                })
+
+            if not deleted_codes:
+                await db_session.rollback()
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": "所选兑换码中没有可批量删除的未使用兑换码",
+                    "deleted_codes": [],
+                    "skipped_codes": skipped_codes,
+                }
+
+            await db_session.commit()
+
+            message = f"批量删除完成：成功删除 {len(deleted_codes)} 个未使用兑换码"
+            if skipped_codes:
+                message += f"，跳过 {len(skipped_codes)} 个不符合条件的兑换码"
+
+            return {
+                "success": True,
+                "message": message,
+                "deleted_codes": deleted_codes,
+                "skipped_codes": skipped_codes,
+                "error": None,
+            }
+
+        except Exception:
+            await db_session.rollback()
+            logger.exception("批量删除兑换码失败")
+            return {
+                "success": False,
+                "message": None,
+                "error": "批量删除兑换码失败，请稍后重试",
             }
 
     async def update_code(

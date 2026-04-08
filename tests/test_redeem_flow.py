@@ -375,6 +375,209 @@ class RedeemFlowServiceTests(unittest.IsolatedAsyncioTestCase):
             ).scalar_one_or_none()
             self.assertIsNotNone(remaining_code)
 
+    async def test_bulk_delete_only_removes_unused_codes_without_records(self):
+        async with self.session_factory() as session:
+            team = Team(
+                id=21,
+                email="owner-21@example.com",
+                access_token_encrypted="token-21",
+                account_id="acct-21",
+                team_name="History Team",
+                current_members=1,
+                max_members=6,
+                status="active",
+                pool_type="normal",
+            )
+            session.add(team)
+            await session.commit()
+
+            deletable_code = RedemptionCode(
+                code="BULK-DELETE-UNUSED-001",
+                status="unused",
+                pool_type="normal",
+            )
+            used_code = RedemptionCode(
+                code="BULK-DELETE-USED-001",
+                status="used",
+                used_by_email="user@example.com",
+                used_team_id=21,
+                used_at=get_now() - timedelta(days=1),
+                pool_type="normal",
+            )
+            historical_code = RedemptionCode(
+                code="BULK-DELETE-HISTORY-001",
+                status="unused",
+                pool_type="normal",
+            )
+            session.add_all([deletable_code, used_code, historical_code])
+            await session.commit()
+
+            session.add(
+                RedemptionRecord(
+                    email="user@example.com",
+                    code="BULK-DELETE-HISTORY-001",
+                    team_id=21,
+                    account_id="acct-21",
+                    redeemed_at=get_now() - timedelta(days=2),
+                )
+            )
+            await session.commit()
+
+            service = RedemptionService()
+            result = await service.bulk_delete_codes(
+                [
+                    "BULK-DELETE-UNUSED-001",
+                    "BULK-DELETE-USED-001",
+                    "BULK-DELETE-HISTORY-001",
+                ],
+                session,
+            )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["deleted_codes"], ["BULK-DELETE-UNUSED-001"])
+            self.assertEqual(len(result["skipped_codes"]), 2)
+            self.assertIn("跳过 2 个", result["message"])
+
+            remaining_codes = (
+                await session.execute(
+                    select(RedemptionCode.code).where(
+                        RedemptionCode.code.in_([
+                            "BULK-DELETE-UNUSED-001",
+                            "BULK-DELETE-USED-001",
+                            "BULK-DELETE-HISTORY-001",
+                        ])
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(
+                sorted(remaining_codes),
+                ["BULK-DELETE-HISTORY-001", "BULK-DELETE-USED-001"]
+            )
+
+    async def test_bulk_delete_does_not_persist_status_changes_for_skipped_codes(self):
+        async with self.session_factory() as session:
+            deletable_code = RedemptionCode(
+                code="BULK-DELETE-UNUSED-002",
+                status="unused",
+                pool_type="normal",
+            )
+            skipped_code = RedemptionCode(
+                code="BULK-DELETE-STALE-STATUS-001",
+                status="used",
+                has_warranty=True,
+                warranty_days=30,
+                used_at=get_now() - timedelta(days=40),
+                warranty_expires_at=get_now() - timedelta(days=10),
+                pool_type="normal",
+            )
+            session.add_all([deletable_code, skipped_code])
+            await session.commit()
+
+            service = RedemptionService()
+            result = await service.bulk_delete_codes(
+                [
+                    "BULK-DELETE-UNUSED-002",
+                    "BULK-DELETE-STALE-STATUS-001",
+                ],
+                session,
+            )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["deleted_codes"], ["BULK-DELETE-UNUSED-002"])
+            self.assertEqual(len(result["skipped_codes"]), 1)
+            self.assertEqual(result["skipped_codes"][0]["code"], "BULK-DELETE-STALE-STATUS-001")
+
+        async with self.session_factory() as verify_session:
+            remaining_code = (
+                await verify_session.execute(
+                    select(RedemptionCode).where(
+                        RedemptionCode.code == "BULK-DELETE-STALE-STATUS-001"
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(remaining_code.status, "used")
+
+    async def test_bulk_delete_skips_code_when_record_appears_before_delete(self):
+        class RacingRedemptionService(RedemptionService):
+            def __init__(self):
+                super().__init__()
+                self.injected = False
+
+            async def _delete_unused_code_if_eligible(self, db_session, code, now=None):
+                if code == "BULK-DELETE-RACE-001" and not self.injected:
+                    db_session.add(
+                        RedemptionRecord(
+                            email="late-user@example.com",
+                            code=code,
+                            team_id=22,
+                            account_id="acct-22",
+                            redeemed_at=get_now(),
+                        )
+                    )
+                    await db_session.flush()
+                    self.injected = True
+                return await super()._delete_unused_code_if_eligible(db_session, code, now=now)
+
+        async with self.session_factory() as session:
+            team = Team(
+                id=22,
+                email="owner-22@example.com",
+                access_token_encrypted="token-22",
+                account_id="acct-22",
+                team_name="Race Team",
+                current_members=1,
+                max_members=6,
+                status="active",
+                pool_type="normal",
+            )
+            safe_code = RedemptionCode(
+                code="BULK-DELETE-RACE-SAFE-001",
+                status="unused",
+                pool_type="normal",
+            )
+            racing_code = RedemptionCode(
+                code="BULK-DELETE-RACE-001",
+                status="unused",
+                pool_type="normal",
+            )
+            session.add_all([team, safe_code, racing_code])
+            await session.commit()
+
+            service = RacingRedemptionService()
+            result = await service.bulk_delete_codes(
+                [
+                    "BULK-DELETE-RACE-SAFE-001",
+                    "BULK-DELETE-RACE-001",
+                ],
+                session,
+            )
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["deleted_codes"], ["BULK-DELETE-RACE-SAFE-001"])
+            self.assertEqual(len(result["skipped_codes"]), 1)
+            self.assertEqual(result["skipped_codes"][0]["code"], "BULK-DELETE-RACE-001")
+            self.assertIn("关联记录", result["skipped_codes"][0]["reason"])
+
+        async with self.session_factory() as verify_session:
+            remaining_codes = (
+                await verify_session.execute(
+                    select(RedemptionCode.code).where(
+                        RedemptionCode.code.in_([
+                            "BULK-DELETE-RACE-SAFE-001",
+                            "BULK-DELETE-RACE-001",
+                        ])
+                    )
+                )
+            ).scalars().all()
+            self.assertEqual(remaining_codes, ["BULK-DELETE-RACE-001"])
+
+            record_count = (
+                await verify_session.execute(
+                    select(RedemptionRecord).where(RedemptionRecord.code == "BULK-DELETE-RACE-001")
+                )
+            ).scalars().all()
+            self.assertEqual(len(record_count), 1)
+
     async def test_atomic_seat_reservation_prevents_over_allocation(self):
         async with self.session_factory() as session:
             team = Team(

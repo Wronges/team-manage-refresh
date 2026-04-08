@@ -119,6 +119,8 @@
                 <tr data-status="{{ code.status }}">
                     <td>
                         <input type="checkbox" class="code-checkbox" value="{{ code.code }}"
+                            data-status="{{ code.status }}"
+                            data-can-delete="{{ 'true' if code.can_delete and code.status == 'unused' else 'false' }}"
                             onchange="updateSelectionCount()" style="width: auto; margin: 0;">
                     </td>
                     <td>
@@ -187,10 +189,14 @@
     <div id="bulkActionBar" class="bulk-action-bar" style="display: none;">
         <div class="bulk-info">
             已选择 <span id="selectedCount">0</span> 个兑换码
+            <span id="bulkDeleteEligibleInfo" class="bulk-delete-eligible-info">，可批量删除 <span id="selectedDeletableCount">0</span> 个未使用兑换码</span>
         </div>
         <div class="bulk-actions">
             <button onclick="showBulkEditModal()" class="btn btn-primary">
                 <i data-lucide="edit-3" style="width: 16px; height: 16px;"></i> 批量修改质保
+            </button>
+            <button id="bulkDeleteBtn" onclick="showBulkDeleteModal()" class="btn btn-danger" disabled>
+                <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i> 批量删除未使用
             </button>
             <button onclick="deselectAll()" class="btn btn-secondary">取消全选</button>
         </div>
@@ -293,6 +299,35 @@
         <button onclick="showModal('generateCodeModal')" class="btn btn-primary">立即生成</button>
     </div>
     {% endif %}
+</div>
+
+<!-- 批量删除兑换码确认模态框 -->
+<div id="bulkDeleteCodesModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>批量删除未使用兑换码</h3>
+            <button class="modal-close" onclick="hideModal('bulkDeleteCodesModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-warning" style="margin-bottom: 1rem;">
+                系统只会删除<strong>未使用且没有任何关联记录</strong>的兑换码。其他已选中的兑换码会自动跳过，不会误删历史数据。
+            </div>
+            <form id="bulkDeleteCodesForm" onsubmit="handleBulkDeleteCodes(event)">
+                <div class="form-group">
+                    <label>当前选中</label>
+                    <input type="text" id="bulk-delete-selected-display" class="form-control" readonly
+                        style="background: rgba(0,0,0,0.05);">
+                </div>
+                <div class="form-group">
+                    <label>本次将删除</label>
+                    <input type="text" id="bulk-delete-eligible-display" class="form-control" readonly
+                        style="background: rgba(0,0,0,0.05);">
+                    <small id="bulk-delete-skip-tip" class="form-text">不符合条件的兑换码会自动跳过。</small>
+                </div>
+                <button type="submit" class="btn btn-danger" style="margin-top: 1rem;">确认批量删除</button>
+            </form>
+        </div>
+    </div>
 </div>
 
 <!-- 批量编辑兑换码模态框 -->
@@ -553,6 +588,10 @@
         white-space: nowrap;
     }
 
+    .bulk-delete-eligible-info {
+        color: var(--text-secondary);
+    }
+
     .bulk-actions {
         display: flex;
         gap: 0.5rem;
@@ -792,16 +831,39 @@
         }
     }
 
+    function getSelectedCodeCheckboxes() {
+        return Array.from(document.querySelectorAll('.code-checkbox:checked'));
+    }
+
+    function getBulkDeleteSummary() {
+        const selected = getSelectedCodeCheckboxes();
+        const deletable = selected.filter((checkbox) =>
+            checkbox.dataset.canDelete === 'true' && checkbox.dataset.status === 'unused'
+        );
+
+        return {
+            totalCount: selected.length,
+            deletableCount: deletable.length,
+            skippedCount: Math.max(selected.length - deletable.length, 0),
+            deletableCodes: deletable.map((checkbox) => checkbox.value),
+        };
+    }
+
     // 更新选择计数
     function updateSelectionCount() {
-        const selected = document.querySelectorAll('.code-checkbox:checked');
-        const count = selected.length;
-        document.getElementById('selectedCount').innerText = count;
+        const summary = getBulkDeleteSummary();
+        document.getElementById('selectedCount').innerText = summary.totalCount;
+        document.getElementById('selectedDeletableCount').innerText = summary.deletableCount;
 
         const actionBar = document.getElementById('bulkActionBar');
+        const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
         if (!actionBar) return;
 
-        if (count > 0) {
+        if (bulkDeleteBtn) {
+            bulkDeleteBtn.disabled = summary.deletableCount <= 0;
+        }
+
+        if (summary.totalCount > 0) {
             actionBar.style.display = 'flex';
             actionBar.classList.add('viewport-floating');
         } else {
@@ -812,12 +874,31 @@
 
     // 显示批量编辑弹窗
     function showBulkEditModal() {
-        const selected = document.querySelectorAll('.code-checkbox:checked');
+        const selected = getSelectedCodeCheckboxes();
         document.getElementById('bulk-selected-count-display').innerText = selected.length;
         document.getElementById('bulk-edit-has-warranty').checked = false;
         document.getElementById('bulk-edit-warranty-type').value = 'days';
         toggleCodeWarrantyForm('bulk-edit', false);
         showModal('bulkEditCodeModal');
+    }
+
+    function showBulkDeleteModal() {
+        const summary = getBulkDeleteSummary();
+        if (summary.totalCount <= 0) {
+            showToast('请先选择兑换码', 'error');
+            return;
+        }
+        if (summary.deletableCount <= 0) {
+            showToast('当前选中项中没有可批量删除的未使用兑换码', 'error');
+            return;
+        }
+
+        document.getElementById('bulk-delete-selected-display').value = `已选择 ${summary.totalCount} 个兑换码`;
+        document.getElementById('bulk-delete-eligible-display').value = `将删除 ${summary.deletableCount} 个未使用兑换码`;
+        document.getElementById('bulk-delete-skip-tip').innerText = summary.skippedCount > 0
+            ? `其余 ${summary.skippedCount} 个选中项会自动跳过：仅支持删除未使用且无关联记录的兑换码。`
+            : '本次选中的兑换码均符合批量删除条件。';
+        showModal('bulkDeleteCodesModal');
     }
 
     function toggleCodeWarrantyTypeFields(prefix, warrantyType) {
@@ -841,7 +922,7 @@
     // 处理批量编辑
     async function handleBulkEditCode(event) {
         event.preventDefault();
-        const selected = document.querySelectorAll('.code-checkbox:checked');
+        const selected = getSelectedCodeCheckboxes();
         const codes = Array.from(selected).map(cb => cb.value);
 
         const has_warranty = document.getElementById('bulk-edit-has-warranty').checked;
@@ -872,6 +953,41 @@
                 setTimeout(() => window.location.reload(), 1000);
             } else {
                 showToast(result.error || '批量更新失败', 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('网络错误', 'error');
+        }
+    }
+
+    async function handleBulkDeleteCodes(event) {
+        event.preventDefault();
+        const summary = getBulkDeleteSummary();
+
+        if (summary.deletableCount <= 0) {
+            showToast('当前没有可批量删除的未使用兑换码', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/admin/codes/bulk-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    codes: summary.deletableCodes
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                hideModal('bulkDeleteCodesModal');
+                showToast(result.message || '批量删除成功', 'success');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                showToast(result.error || '批量删除失败', 'error');
             }
         } catch (error) {
             console.error(error);
